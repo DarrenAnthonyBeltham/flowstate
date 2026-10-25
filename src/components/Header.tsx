@@ -15,12 +15,17 @@ import {
   Zap,
   Download,
   Upload,
+  LogOut,
+  WifiOff,
+  RefreshCw,
 } from 'lucide-react';
 import { useFlowState } from '@/context/FlowStateContext';
 import { ViewMode } from '@/types';
 
 export default function Header() {
   const {
+    user,
+    syncStatus,
     streak,
     selectedDate,
     viewMode,
@@ -28,6 +33,7 @@ export default function Header() {
     setIsScratchpadOpen,
     exportWorkspace,
     importWorkspace,
+    signOut,
   } = useFlowState();
 
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
@@ -95,6 +101,37 @@ export default function Header() {
       },
     ];
 
+  const renderSyncBadge = () => {
+    if (syncStatus === 'syncing') {
+      return (
+        <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-sky-500/10 text-sky-400 border border-sky-500/20">
+          <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+          syncing...
+        </span>
+      );
+    }
+    if (syncStatus === 'offline') {
+      return (
+        <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <WifiOff className="w-2.5 h-2.5" />
+          offline::cached
+        </span>
+      );
+    }
+    if (syncStatus === 'error') {
+      return (
+        <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          sync::error
+        </span>
+      );
+    }
+    return (
+      <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        rls::synced
+      </span>
+    );
+  };
+
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#070a12]/90 backdrop-blur-xl">
       <div className="max-w-[1720px] mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
@@ -109,12 +146,10 @@ export default function Header() {
               <h1 className="font-mono font-bold text-slate-100 tracking-tight text-sm sm:text-base">
                 flowstate<span className="text-sky-400">.dev</span>
               </h1>
-              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                supabase::connected
-              </span>
+              {renderSyncBadge()}
             </div>
             <p className="text-[11px] font-mono text-slate-400 hidden sm:block">
-              branch: main · target: {selectedDate}
+              {user?.email?.split('@')[0] || 'dev'} · target: {selectedDate}
             </p>
           </div>
         </div>
@@ -123,6 +158,7 @@ export default function Header() {
           {viewOptions.map((opt) => (
             <button
               key={opt.id}
+              type="button"
               onClick={() => setViewMode(opt.id)}
               className={`relative flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-colors ${
                 viewMode === opt.id
@@ -156,6 +192,7 @@ export default function Header() {
               {formatTimer(secondsLeft)}
             </span>
             <button
+              type="button"
               onClick={() => setIsRunning(!isRunning)}
               className="p-1 hover:bg-slate-800 rounded-md text-slate-300 hover:text-sky-400 transition-colors"
             >
@@ -166,6 +203,7 @@ export default function Header() {
               )}
             </button>
             <button
+              type="button"
               onClick={() => {
                 setIsRunning(false);
                 setIsBreak(false);
@@ -200,6 +238,7 @@ export default function Header() {
               type="button"
               onClick={exportWorkspace}
               className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl transition-colors"
+              title="Export Backup JSON"
             >
               <Download className="w-4 h-4" />
             </button>
@@ -207,6 +246,7 @@ export default function Header() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl transition-colors"
+              title="Import Backup JSON"
             >
               <Upload className="w-4 h-4" />
             </button>
@@ -218,6 +258,15 @@ export default function Header() {
               className="hidden"
             />
           </div>
+
+          <button
+            type="button"
+            onClick={signOut}
+            className="p-2 bg-slate-900 hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/30 rounded-xl transition-colors"
+            title="Sign Out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>

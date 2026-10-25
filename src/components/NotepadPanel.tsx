@@ -17,6 +17,8 @@ import {
   CheckSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  History,
+  RotateCcw,
 } from 'lucide-react';
 import { useFlowState } from '@/context/FlowStateContext';
 import { NoteTag } from '@/types';
@@ -82,9 +84,12 @@ export default function NotepadPanel() {
     addNote,
     updateNote,
     deleteNote,
+    saveNoteSnapshot,
+    restoreNoteSnapshot,
   } = useFlowState();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTag, setActiveTag] = useState<
     'All' | 'Pinned' | 'Date' | NoteTag
@@ -303,6 +308,28 @@ export default function NotepadPanel() {
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
+                      onClick={() => saveNoteSnapshot(activeNote.id)}
+                      className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-mono bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-slate-800 transition-colors"
+                      title="Save Version Snapshot"
+                    >
+                      <span>+Snap</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowHistory((prev) => !prev)}
+                      className={`p-1.5 rounded-xl border transition-colors ${
+                        showHistory
+                          ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                      title="Version History"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => setIsPreview(!isPreview)}
                       className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-mono font-medium border transition-colors ${
                         isPreview
@@ -356,6 +383,52 @@ export default function NotepadPanel() {
                     </button>
                   </div>
                 </div>
+
+                {showHistory && (
+                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono font-semibold text-sky-400">
+                        Version Snapshots ({(activeNote.versions || []).length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => saveNoteSnapshot(activeNote.id)}
+                        className="text-[11px] font-mono text-emerald-400 hover:underline"
+                      >
+                        + Create Checkpoint
+                      </button>
+                    </div>
+                    {(activeNote.versions || []).length === 0 ? (
+                      <p className="text-[11px] font-mono text-slate-500">
+                        No snapshots yet. Click +Snap before major edits.
+                      </p>
+                    ) : (
+                      <div className="max-h-28 overflow-y-auto space-y-1">
+                        {(activeNote.versions || []).map((ver) => (
+                          <div
+                            key={ver.id}
+                            className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono"
+                          >
+                            <span className="text-slate-300 truncate">
+                              {new Date(ver.savedAt).toLocaleString()} (
+                              {ver.content.length} chars)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                restoreNoteSnapshot(activeNote.id, ver.id)
+                              }
+                              className="flex items-center gap-1 text-sky-400 hover:text-sky-300 shrink-0 ml-2"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Restore</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/50">
                   <div className="flex flex-wrap items-center gap-1.5">

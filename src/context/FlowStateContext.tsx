@@ -6,10 +6,13 @@ import React, {
   useState,
   useEffect,
   useRef,
+  useCallback,
 } from 'react';
+import type { User } from '@supabase/supabase-js';
 import {
   RoutineItem,
   NoteItem,
+  NoteVersion,
   GoalItem,
   ViewMode,
   MobileTab,
@@ -18,11 +21,17 @@ import {
   Priority,
   NoteTag,
   GoalCategory,
+  SyncStatus,
+  ToastItem,
 } from '@/types';
 import { supabase } from '@/lib/supabase';
 
 interface FlowStateContextType {
+  user: User | null;
+  authLoading: boolean;
   isHydrated: boolean;
+  syncStatus: SyncStatus;
+  toasts: ToastItem[];
   routines: RoutineItem[];
   notes: NoteItem[];
   goals: GoalItem[];
@@ -49,6 +58,8 @@ interface FlowStateContextType {
   addNote: (partial?: Partial<NoteItem>) => string;
   updateNote: (id: string, updates: Partial<NoteItem>) => void;
   deleteNote: (id: string) => void;
+  saveNoteSnapshot: (noteId: string) => void;
+  restoreNoteSnapshot: (noteId: string, versionId: string) => void;
   addGoal: (item: Omit<GoalItem, 'id' | 'completed'>) => void;
   toggleGoal: (id: string) => void;
   deleteGoal: (id: string) => void;
@@ -56,10 +67,13 @@ interface FlowStateContextType {
   promoteScratchpadToNote: () => string | null;
   exportWorkspace: () => void;
   importWorkspace: (jsonString: string) => boolean;
+  signOut: () => Promise<void>;
+  dismissToast: (id: string) => void;
 }
 
 interface DbRoutineRow {
   id: string;
+  user_id?: string;
   title: string;
   time_slot: string;
   period: TimePeriod;
@@ -70,16 +84,19 @@ interface DbRoutineRow {
 
 interface DbNoteRow {
   id: string;
+  user_id?: string;
   title: string;
   content: string;
   tag: NoteTag;
   pinned: boolean;
   target_date: string | null;
+  versions?: NoteVersion[];
   updated_at: string;
 }
 
 interface DbGoalRow {
   id: string;
+  user_id?: string;
   title: string;
   category: GoalCategory;
   deadline: string | null;
@@ -96,104 +113,9 @@ const computeClientIsoDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const DEFAULT_SCRATCHPAD =
-  'git checkout -b feat/calendar-sync\nQuick terminal thoughts, snippets, or daily scratchpad...';
-
-const DEFAULT_ROUTINES: RoutineItem[] = [
-  {
-    id: 'r-1',
-    title: 'Brew Arabica Coffee & Morning Hydration',
-    timeSlot: '07:30',
-    period: 'morning',
-    category: 'Health',
-    priority: 'medium',
-    completed: true,
-  },
-  {
-    id: 'r-2',
-    title: 'Deep Work: Next.js Architecture & UI Engineering',
-    timeSlot: '09:00',
-    period: 'morning',
-    category: 'Deep Work',
-    priority: 'high',
-    completed: false,
-  },
-  {
-    id: 'r-3',
-    title: 'Mid-Day Market Flow & Portfolio Check',
-    timeSlot: '13:30',
-    period: 'afternoon',
-    category: 'Personal',
-    priority: 'low',
-    completed: false,
-  },
-  {
-    id: 'r-4',
-    title: 'Evening 7.5km Run / Post-Dinner Walk',
-    timeSlot: '18:30',
-    period: 'evening',
-    category: 'Health',
-    priority: 'high',
-    completed: false,
-  },
-  {
-    id: 'r-5',
-    title: 'Daily Commit Log & Plan Tomorrow’s Top 3 Tasks',
-    timeSlot: '21:30',
-    period: 'evening',
-    category: 'Mindfulness',
-    priority: 'medium',
-    completed: false,
-  },
-];
-
-const DEFAULT_NOTES: NoteItem[] = [
-  {
-    id: 'n-1',
-    title: 'feat(workspace): Architecture & Release Backlog',
-    tag: 'DevLog',
-    pinned: true,
-    targetDate: FALLBACK_DATE,
-    updatedAt: '2026-10-18T08:00:00.000Z',
-    content: `# Sprint Backlog\n\nBuilding a developer-focused daily driver with **Supabase** persistence.\n\n\`\`\`bash\nnpm run build && npx vercel --prod\n\`\`\`\n\n- [x] Setup Supabase client & schema\n- [x] Add interactive Calendar & Goal deadlines\n- [ ] Ship production build to Vercel\n- [ ] Optimize mobile navigation ergonomics`,
-  },
-  {
-    id: 'n-2',
-    title: 'Weekly Fitness & Meal Log',
-    tag: 'Personal',
-    pinned: false,
-    targetDate: FALLBACK_DATE,
-    updatedAt: '2026-10-18T07:00:00.000Z',
-    content: `# Training Schedule\n\nKeeping momentum consistent throughout the week:\n\n- **Tuesday / Thursday:** 7.5km evening run session\n- **Friday:** Heavy badminton session\n- **Daily:** 45-min post-dinner walk (3.5km - 5km)`,
-  },
-];
-
-const DEFAULT_GOALS: GoalItem[] = [
-  {
-    id: 'g-1',
-    title: 'Deploy FlowState v2 with Supabase & Calendar to Vercel',
-    category: 'Sprint',
-    deadline: FALLBACK_DATE,
-    completed: false,
-  },
-  {
-    id: 'g-2',
-    title: 'Complete 3x 7.5km Running Sessions + Friday Badminton',
-    category: 'Fitness',
-    deadline: undefined,
-    completed: false,
-  },
-  {
-    id: 'g-3',
-    title: 'Refactor Microservice API & Client Portal UI',
-    category: 'System',
-    deadline: FALLBACK_DATE,
-    completed: true,
-  },
-];
-
-const toDbRoutine = (r: RoutineItem): DbRoutineRow => ({
+const toDbRoutine = (r: RoutineItem, userId: string): DbRoutineRow => ({
   id: r.id,
+  user_id: userId,
   title: r.title,
   time_slot: r.timeSlot,
   period: r.period,
@@ -212,13 +134,15 @@ const fromDbRoutine = (row: DbRoutineRow): RoutineItem => ({
   completed: row.completed,
 });
 
-const toDbNote = (n: NoteItem): DbNoteRow => ({
+const toDbNote = (n: NoteItem, userId: string): DbNoteRow => ({
   id: n.id,
+  user_id: userId,
   title: n.title,
   content: n.content,
   tag: n.tag,
   pinned: n.pinned,
   target_date: n.targetDate || null,
+  versions: n.versions || [],
   updated_at: n.updatedAt,
 });
 
@@ -229,11 +153,13 @@ const fromDbNote = (row: DbNoteRow): NoteItem => ({
   tag: row.tag,
   pinned: row.pinned,
   targetDate: row.target_date || undefined,
+  versions: Array.isArray(row.versions) ? row.versions : [],
   updatedAt: row.updated_at,
 });
 
-const toDbGoal = (g: GoalItem): DbGoalRow => ({
+const toDbGoal = (g: GoalItem, userId: string): DbGoalRow => ({
   id: g.id,
+  user_id: userId,
   title: g.title,
   category: g.category,
   deadline: g.deadline || null,
@@ -253,18 +179,21 @@ const FlowStateContext = createContext<FlowStateContextType | undefined>(
 );
 
 export function FlowStateProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
   const [todayIso, setTodayIso] = useState<string>(FALLBACK_DATE);
   const [selectedDate, setSelectedDate] = useState<string>(FALLBACK_DATE);
-  const [routines, setRoutines] = useState<RoutineItem[]>(DEFAULT_ROUTINES);
-  const [notes, setNotes] = useState<NoteItem[]>(DEFAULT_NOTES);
-  const [goals, setGoals] = useState<GoalItem[]>(DEFAULT_GOALS);
-  const [scratchpad, setScratchpadState] = useState<string>(DEFAULT_SCRATCHPAD);
-  const [streak, setStreak] = useState<number>(5);
-  const [activityDates, setActivityDates] = useState<string[]>([FALLBACK_DATE]);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(
-    DEFAULT_NOTES[0].id
-  );
+  const [routines, setRoutines] = useState<RoutineItem[]>([]);
+  const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [goals, setGoals] = useState<GoalItem[]>([]);
+  const [scratchpad, setScratchpadState] = useState<string>('');
+  const [streak, setStreak] = useState<number>(0);
+  const [activityDates, setActivityDates] = useState<string[]>([]);
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [mobileTab, setMobileTab] = useState<MobileTab>('routine');
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
@@ -274,93 +203,232 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     {}
   );
 
-  useEffect(() => {
-    let active = true;
+  const pushToast = useCallback(
+    (message: string, type: 'success' | 'info' | 'error' = 'info') => {
+      const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 3200);
+    },
+    []
+  );
 
-    const fetchWorkspace = async () => {
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      const clientToday = computeClientIsoDate();
+      setTodayIso(clientToday);
+      setSelectedDate(clientToday);
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+      if (!session?.user) {
+        setIsHydrated(true);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const userId = user.id;
+    const cacheKey = `fs_cache_${userId}`;
+
+    const loadWorkspace = async () => {
+      setSyncStatus('syncing');
+
+      try {
+        const cachedRaw = localStorage.getItem(cacheKey);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (Array.isArray(cached.routines)) setRoutines(cached.routines);
+          if (Array.isArray(cached.notes)) setNotes(cached.notes);
+          if (Array.isArray(cached.goals)) setGoals(cached.goals);
+          if (typeof cached.scratchpad === 'string')
+            setScratchpadState(cached.scratchpad);
+          if (typeof cached.streak === 'number') setStreak(cached.streak);
+          if (Array.isArray(cached.activityDates))
+            setActivityDates(cached.activityDates);
+        }
+      } catch {}
+
       const [routinesRes, notesRes, goalsRes, metaRes] = await Promise.all([
         supabase
           .from('routines')
           .select('*')
+          .eq('user_id', userId)
           .order('time_slot', { ascending: true }),
         supabase
           .from('notes')
           .select('*')
+          .eq('user_id', userId)
           .order('updated_at', { ascending: false }),
         supabase
           .from('goals')
           .select('*')
+          .eq('user_id', userId)
           .order('created_at', { ascending: false }),
-        supabase.from('workspace_meta').select('*').eq('id', 1).maybeSingle(),
+        supabase
+          .from('workspace_meta')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
       ]);
 
       if (!active) return;
 
-      const clientToday = computeClientIsoDate();
-      setTodayIso(clientToday);
-      setSelectedDate(clientToday);
-
-      if (!routinesRes.error && routinesRes.data) {
-        if (routinesRes.data.length > 0) {
-          setRoutines((routinesRes.data as DbRoutineRow[]).map(fromDbRoutine));
-        } else {
-          await supabase
-            .from('routines')
-            .upsert(DEFAULT_ROUTINES.map(toDbRoutine));
-          setRoutines(DEFAULT_ROUTINES);
-        }
-      }
-
-      if (!notesRes.error && notesRes.data) {
-        if (notesRes.data.length > 0) {
-          const loadedNotes = (notesRes.data as DbNoteRow[]).map(fromDbNote);
-          setNotes(loadedNotes);
-          setActiveNoteId(loadedNotes[0].id);
-        } else {
-          await supabase.from('notes').upsert(DEFAULT_NOTES.map(toDbNote));
-          setNotes(DEFAULT_NOTES);
-        }
-      }
-
-      if (!goalsRes.error && goalsRes.data) {
-        if (goalsRes.data.length > 0) {
-          setGoals((goalsRes.data as DbGoalRow[]).map(fromDbGoal));
-        } else {
-          await supabase.from('goals').upsert(DEFAULT_GOALS.map(toDbGoal));
-          setGoals(DEFAULT_GOALS);
-        }
-      }
-
-      if (!metaRes.error) {
-        if (metaRes.data) {
-          setScratchpadState(metaRes.data.scratchpad ?? DEFAULT_SCRATCHPAD);
-          setStreak(metaRes.data.streak ?? 5);
-          if (Array.isArray(metaRes.data.activity_dates)) {
-            setActivityDates(metaRes.data.activity_dates);
-          }
-        } else {
-          await supabase.from('workspace_meta').upsert({
-            id: 1,
-            scratchpad: DEFAULT_SCRATCHPAD,
-            streak: 5,
-            activity_dates: [clientToday],
-            updated_at: new Date().toISOString(),
-          });
-          setActivityDates([clientToday]);
-        }
-      }
-
-      if (active) {
+      if (routinesRes.error || notesRes.error || goalsRes.error) {
+        setSyncStatus(navigator.onLine ? 'error' : 'offline');
         setIsHydrated(true);
+        return;
       }
+
+      setRoutines((routinesRes.data as DbRoutineRow[]).map(fromDbRoutine));
+
+      const loadedNotes = (notesRes.data as DbNoteRow[]).map(fromDbNote);
+      setNotes(loadedNotes);
+      setActiveNoteId(loadedNotes[0]?.id ?? null);
+
+      setGoals((goalsRes.data as DbGoalRow[]).map(fromDbGoal));
+
+      if (metaRes.data) {
+        setScratchpadState(metaRes.data.scratchpad ?? '');
+        setStreak(metaRes.data.streak ?? 0);
+        setActivityDates(
+          Array.isArray(metaRes.data.activity_dates)
+            ? metaRes.data.activity_dates
+            : []
+        );
+      } else {
+        await supabase.from('workspace_meta').upsert(
+          {
+            user_id: userId,
+            scratchpad: '',
+            streak: 0,
+            activity_dates: [],
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+        setScratchpadState('');
+        setStreak(0);
+        setActivityDates([]);
+      }
+
+      setSyncStatus('synced');
+      setIsHydrated(true);
     };
 
-    fetchWorkspace();
+    loadWorkspace();
+
+    const channel = supabase
+      .channel(`workspace_${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'routines',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          supabase
+            .from('routines')
+            .select('*')
+            .eq('user_id', userId)
+            .order('time_slot', { ascending: true })
+            .then(({ data }) => {
+              if (data) setRoutines((data as DbRoutineRow[]).map(fromDbRoutine));
+            });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'goals',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          supabase
+            .from('goals')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .then(({ data }) => {
+              if (data) setGoals((data as DbGoalRow[]).map(fromDbGoal));
+            });
+        }
+      )
+      .subscribe();
 
     return () => {
       active = false;
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !isHydrated) return;
+    const cacheKey = `fs_cache_${user.id}`;
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        routines,
+        notes,
+        goals,
+        scratchpad,
+        streak,
+        activityDates,
+      })
+    );
+  }, [
+    user,
+    isHydrated,
+    routines,
+    notes,
+    goals,
+    scratchpad,
+    streak,
+    activityDates,
+  ]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setSyncStatus('synced');
+      pushToast('Back online — synced with Supabase', 'success');
+    };
+    const handleOffline = () => {
+      setSyncStatus('offline');
+      pushToast('Offline mode — caching changes locally', 'info');
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [pushToast]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -382,16 +450,23 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     nextStreak: number,
     nextDates: string[]
   ) => {
+    if (!user) return;
+    setSyncStatus('syncing');
     supabase
       .from('workspace_meta')
-      .upsert({
-        id: 1,
-        scratchpad: nextScratch,
-        streak: nextStreak,
-        activity_dates: nextDates,
-        updated_at: new Date().toISOString(),
-      })
-      .then();
+      .upsert(
+        {
+          user_id: user.id,
+          scratchpad: nextScratch,
+          streak: nextStreak,
+          activity_dates: nextDates,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      )
+      .then(({ error }) => {
+        setSyncStatus(error ? 'error' : 'synced');
+      });
   };
 
   const setScratchpad = (text: string) => {
@@ -411,18 +486,22 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     setActivityDates(nextDates);
     setStreak(nextStreak);
     syncMeta(scratchpad, nextStreak, nextDates);
+    pushToast(`Streak incremented to ${nextStreak} days!`, 'success');
   };
 
   const toggleRoutine = (id: string) => {
+    if (!user) return;
     setRoutines((prev) =>
       prev.map((item) => {
         if (item.id === id) {
           const updated = { ...item, completed: !item.completed };
+          setSyncStatus('syncing');
           supabase
             .from('routines')
             .update({ completed: updated.completed })
             .eq('id', id)
-            .then();
+            .eq('user_id', user.id)
+            .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
           if (updated.completed && !activityDates.includes(todayIso)) {
             const nextDates = [...activityDates, todayIso];
             const nextStreak = streak + 1;
@@ -438,6 +517,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addRoutine = (item: Omit<RoutineItem, 'id' | 'completed'>) => {
+    if (!user) return;
     const newItem: RoutineItem = {
       ...item,
       id: `r-${Date.now()}`,
@@ -446,24 +526,43 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     setRoutines((prev) =>
       [...prev, newItem].sort((a, b) => a.timeSlot.localeCompare(b.timeSlot))
     );
-    supabase.from('routines').insert(toDbRoutine(newItem)).then();
+    setSyncStatus('syncing');
+    supabase
+      .from('routines')
+      .insert(toDbRoutine(newItem, user.id))
+      .then(({ error }) => {
+        setSyncStatus(error ? 'error' : 'synced');
+        if (!error) pushToast('Routine block added', 'success');
+      });
   };
 
   const updateRoutine = (updated: RoutineItem) => {
+    if (!user) return;
     setRoutines((prev) =>
       prev
         .map((item) => (item.id === updated.id ? updated : item))
         .sort((a, b) => a.timeSlot.localeCompare(b.timeSlot))
     );
-    supabase.from('routines').upsert(toDbRoutine(updated)).then();
+    setSyncStatus('syncing');
+    supabase
+      .from('routines')
+      .upsert(toDbRoutine(updated, user.id))
+      .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
   };
 
   const deleteRoutine = (id: string) => {
+    if (!user) return;
     setRoutines((prev) => prev.filter((item) => item.id !== id));
-    supabase.from('routines').delete().eq('id', id).then();
+    supabase
+      .from('routines')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .then(() => pushToast('Routine deleted', 'info'));
   };
 
   const resetDay = () => {
+    if (!user) return;
     const completedCount = routines.filter((r) => r.completed).length;
     const nextDates = activityDates.includes(todayIso)
       ? activityDates
@@ -477,7 +576,11 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     setRoutines((prev) => prev.map((item) => ({ ...item, completed: false })));
-    supabase.from('routines').update({ completed: false }).neq('id', '').then();
+    supabase
+      .from('routines')
+      .update({ completed: false })
+      .eq('user_id', user.id)
+      .then(() => pushToast('Day reset for a fresh start', 'success'));
   };
 
   const addNote = (partial?: Partial<NoteItem>) => {
@@ -491,15 +594,26 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       tag: partial?.tag || 'DevLog',
       pinned: partial?.pinned || false,
       targetDate: partial?.targetDate ?? selectedDate,
+      versions: [],
       updatedAt: new Date().toISOString(),
     };
     setNotes((prev) => [newNote, ...prev]);
     setActiveNoteId(id);
-    supabase.from('notes').insert(toDbNote(newNote)).then();
+    if (user) {
+      setSyncStatus('syncing');
+      supabase
+        .from('notes')
+        .insert(toDbNote(newNote, user.id))
+        .then(({ error }) => {
+          setSyncStatus(error ? 'error' : 'synced');
+          if (!error) pushToast('New note created', 'success');
+        });
+    }
     return id;
   };
 
   const updateNote = (id: string, updates: Partial<NoteItem>) => {
+    if (!user) return;
     const now = new Date().toISOString();
     setNotes((prev) =>
       prev.map((note) => {
@@ -508,9 +622,13 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
           if (noteTimersRef.current[id]) {
             clearTimeout(noteTimersRef.current[id]);
           }
+          setSyncStatus('syncing');
           noteTimersRef.current[id] = setTimeout(() => {
-            supabase.from('notes').upsert(toDbNote(updatedNote)).then();
-          }, 300);
+            supabase
+              .from('notes')
+              .upsert(toDbNote(updatedNote, user.id))
+              .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
+          }, 350);
           return updatedNote;
         }
         return note;
@@ -518,12 +636,47 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  const saveNoteSnapshot = (noteId: string) => {
+    if (!user) return;
+    const target = notes.find((n) => n.id === noteId);
+    if (!target) return;
+    const snap: NoteVersion = {
+      id: `v-${Date.now()}`,
+      content: target.content,
+      savedAt: new Date().toISOString(),
+    };
+    const nextVersions = [snap, ...(target.versions || [])].slice(0, 15);
+    updateNote(noteId, { versions: nextVersions });
+    pushToast('Snapshot saved to version history', 'success');
+  };
+
+  const restoreNoteSnapshot = (noteId: string, versionId: string) => {
+    const target = notes.find((n) => n.id === noteId);
+    const ver = target?.versions?.find((v) => v.id === versionId);
+    if (!target || !ver) return;
+    updateNote(noteId, { content: ver.content });
+    pushToast('Note restored from snapshot', 'info');
+  };
+
   const deleteNote = (id: string) => {
-    setNotes((prev) => prev.filter((note) => note.id !== id));
-    supabase.from('notes').delete().eq('id', id).then();
+    if (!user) return;
+    setNotes((prev) => {
+      const remaining = prev.filter((note) => note.id !== id);
+      if (activeNoteId === id) {
+        setActiveNoteId(remaining[0]?.id ?? null);
+      }
+      return remaining;
+    });
+    supabase
+      .from('notes')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .then(() => pushToast('Note deleted', 'info'));
   };
 
   const addGoal = (item: Omit<GoalItem, 'id' | 'completed'>) => {
+    if (!user) return;
     const newGoal: GoalItem = {
       id: `g-${Date.now()}`,
       title: item.title,
@@ -532,19 +685,29 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       completed: false,
     };
     setGoals((prev) => [newGoal, ...prev]);
-    supabase.from('goals').insert(toDbGoal(newGoal)).then();
+    setSyncStatus('syncing');
+    supabase
+      .from('goals')
+      .insert(toDbGoal(newGoal, user.id))
+      .then(({ error }) => {
+        setSyncStatus(error ? 'error' : 'synced');
+        if (!error) pushToast('Goal added', 'success');
+      });
   };
 
   const toggleGoal = (id: string) => {
+    if (!user) return;
     setGoals((prev) =>
       prev.map((g) => {
         if (g.id === id) {
           const updated = { ...g, completed: !g.completed };
+          setSyncStatus('syncing');
           supabase
             .from('goals')
             .update({ completed: updated.completed })
             .eq('id', id)
-            .then();
+            .eq('user_id', user.id)
+            .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
           return updated;
         }
         return g;
@@ -553,8 +716,14 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteGoal = (id: string) => {
+    if (!user) return;
     setGoals((prev) => prev.filter((g) => g.id !== id));
-    supabase.from('goals').delete().eq('id', id).then();
+    supabase
+      .from('goals')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .then(() => pushToast('Goal removed', 'info'));
   };
 
   const promoteScratchpadToNote = () => {
@@ -595,26 +764,40 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     a.download = `flowstate-backup-${todayIso}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    pushToast('Workspace backup exported', 'success');
   };
 
   const importWorkspace = (jsonString: string): boolean => {
+    if (!user) return false;
     try {
       const data = JSON.parse(jsonString);
       if (Array.isArray(data.routines)) {
         setRoutines(data.routines);
-        supabase.from('routines').upsert(data.routines.map(toDbRoutine)).then();
+        supabase
+          .from('routines')
+          .upsert(
+            data.routines.map((r: RoutineItem) => toDbRoutine(r, user.id))
+          )
+          .then();
       }
       if (Array.isArray(data.notes)) {
         setNotes(data.notes);
-        supabase.from('notes').upsert(data.notes.map(toDbNote)).then();
+        supabase
+          .from('notes')
+          .upsert(data.notes.map((n: NoteItem) => toDbNote(n, user.id)))
+          .then();
       }
       if (Array.isArray(data.goals)) {
         setGoals(data.goals);
-        supabase.from('goals').upsert(data.goals.map(toDbGoal)).then();
+        supabase
+          .from('goals')
+          .upsert(data.goals.map((g: GoalItem) => toDbGoal(g, user.id)))
+          .then();
       }
       const nextScratch =
         typeof data.scratchpad === 'string' ? data.scratchpad : scratchpad;
-      const nextStreak = typeof data.streak === 'number' ? data.streak : streak;
+      const nextStreak =
+        typeof data.streak === 'number' ? data.streak : streak;
       const nextDates = Array.isArray(data.activityDates)
         ? data.activityDates
         : activityDates;
@@ -622,16 +805,37 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       setStreak(nextStreak);
       setActivityDates(nextDates);
       syncMeta(nextScratch, nextStreak, nextDates);
+      pushToast('Backup imported & synced', 'success');
       return true;
     } catch {
+      pushToast('Invalid backup JSON file', 'error');
       return false;
     }
+  };
+
+  const signOut = async () => {
+    if (user) {
+      localStorage.removeItem(`fs_cache_${user.id}`);
+    }
+    await supabase.auth.signOut();
+    setUser(null);
+    setRoutines([]);
+    setNotes([]);
+    setGoals([]);
+    setScratchpadState('');
+    setStreak(0);
+    setActivityDates([]);
+    setActiveNoteId(null);
   };
 
   return (
     <FlowStateContext.Provider
       value={{
+        user,
+        authLoading,
         isHydrated,
+        syncStatus,
+        toasts,
         routines,
         notes,
         goals,
@@ -658,6 +862,8 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         addNote,
         updateNote,
         deleteNote,
+        saveNoteSnapshot,
+        restoreNoteSnapshot,
         addGoal,
         toggleGoal,
         deleteGoal,
@@ -665,6 +871,8 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         promoteScratchpadToNote,
         exportWorkspace,
         importWorkspace,
+        signOut,
+        dismissToast,
       }}
     >
       {children}

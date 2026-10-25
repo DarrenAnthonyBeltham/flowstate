@@ -14,6 +14,12 @@ export interface RoutineItem {
 
 export type NoteTag = 'Work' | 'Ideas' | 'Personal' | 'Journal' | 'DevLog';
 
+export interface NoteVersion {
+  id: string;
+  content: string;
+  savedAt: string;
+}
+
 export interface NoteItem {
   id: string;
   title: string;
@@ -22,6 +28,7 @@ export interface NoteItem {
   pinned: boolean;
   targetDate?: string;
   updatedAt: string;
+  versions?: NoteVersion[];
 }
 
 export type GoalCategory = 'Sprint' | 'System' | 'Fitness' | 'Personal';
@@ -36,3 +43,10 @@ export interface GoalItem {
 
 export type ViewMode = 'split' | 'calendar' | 'routine' | 'notes';
 export type MobileTab = 'routine' | 'calendar' | 'notes' | 'scratchpad';
+export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
+
+export interface ToastItem {
+  id: string;
+  message: string;
+  type: 'success' | 'info' | 'error';
+}
