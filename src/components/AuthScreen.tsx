@@ -29,9 +29,16 @@ export default function AuthScreen() {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: {
+          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
+        },
       });
       if (error) {
-        setErrorMsg(error.message);
+        if (error.message.includes('Error sending confirmation email') || error.code === 'unexpected_failure') {
+          setErrorMsg('Failed to send verification email: in Resend test mode, emails can only be delivered to your registered Resend account email.');
+        } else {
+          setErrorMsg(error.message);
+        }
       } else if (data.user && !data.session) {
         setInfoMsg('Account created! Check your email inbox to confirm your session.');
       }
@@ -45,7 +52,7 @@ export default function AuthScreen() {
     await supabase.auth.signInWithOAuth({
       provider: 'github',
       options: {
-        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined,
       },
     });
   };
