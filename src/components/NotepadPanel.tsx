@@ -19,6 +19,7 @@ import {
   PanelLeftOpen,
   History,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 import { useFlowState } from '@/context/FlowStateContext';
 import { NoteTag } from '@/types';
@@ -86,6 +87,7 @@ export default function NotepadPanel() {
     deleteNote,
     saveNoteSnapshot,
     restoreNoteSnapshot,
+    generateDailyStandup,
   } = useFlowState();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -306,6 +308,19 @@ export default function NotepadPanel() {
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        generateDailyStandup();
+                        setIsPreview(false);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-mono font-semibold bg-linear-to-r from-sky-400 to-emerald-400 text-slate-950 shadow-sm transition-all hover:opacity-90"
+                      title="Generate Daily Standup Note"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">+Standup</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => saveNoteSnapshot(activeNote.id)}

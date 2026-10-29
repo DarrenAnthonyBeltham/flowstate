@@ -10,6 +10,8 @@ export interface RoutineItem {
   category: RoutineCategory;
   priority: Priority;
   completed: boolean;
+  daysOfWeek?: string[];
+  pomodorosCompleted?: number;
 }
 
 export type NoteTag = 'Work' | 'Ideas' | 'Personal' | 'Journal' | 'DevLog';
@@ -33,12 +35,21 @@ export interface NoteItem {
 
 export type GoalCategory = 'Sprint' | 'System' | 'Fitness' | 'Personal';
 
+export interface GoalSubtask {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
 export interface GoalItem {
   id: string;
   title: string;
   category: GoalCategory;
   deadline?: string;
   completed: boolean;
+  subtasks?: GoalSubtask[];
+  targetCount?: number;
+  currentCount?: number;
 }
 
 export type ViewMode = 'split' | 'calendar' | 'routine' | 'notes';

@@ -14,6 +14,8 @@ import {
   FileCode2,
   Sparkles,
   ArrowUpRight,
+  Shield,
+  Layers,
 } from 'lucide-react';
 import { useFlowState } from '@/context/FlowStateContext';
 import { GoalCategory } from '@/types';
@@ -55,6 +57,8 @@ export default function CalendarGoalsPanel() {
     goals,
     streak,
     activityDates,
+    activityMap,
+    streakFreezes,
     todayIso,
     selectedDate,
     setSelectedDate,
@@ -63,43 +67,40 @@ export default function CalendarGoalsPanel() {
     addGoal,
     toggleGoal,
     deleteGoal,
+    addSubtask,
+    toggleSubtask,
+    deleteSubtask,
+    updateGoalProgress,
     logTodayStreak,
+    consumeStreakFreeze,
     setMobileTab,
   } = useFlowState();
 
-  const [activeSubTab, setActiveSubTab] = useState<'calendar' | 'goals'>(
-    'calendar'
-  );
-  const [viewYear, setViewYear] = useState(() =>
-    Number(selectedDate.slice(0, 4))
-  );
-  const [viewMonth, setViewMonth] = useState(
-    () => Number(selectedDate.slice(5, 7)) - 1
-  );
+  const [activeSubTab, setActiveSubTab] = useState<'calendar' | 'goals'>('calendar');
+  const [heatmapRange, setHeatmapRange] = useState<'14d' | '90d'>('14d');
+  const [viewYear, setViewYear] = useState(() => Number(selectedDate.slice(0, 4)));
+  const [viewMonth, setViewMonth] = useState(() => Number(selectedDate.slice(5, 7)) - 1);
 
   const [goalTitle, setGoalTitle] = useState('');
   const [goalCategory, setGoalCategory] = useState<GoalCategory>('Sprint');
-  const [goalDeadline, setGoalDeadline] = useState<string | undefined>(
-    undefined
-  );
+  const [goalDeadline, setGoalDeadline] = useState<string | undefined>(undefined);
+  const [goalTargetCount, setGoalTargetCount] = useState<string>('');
+  const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const [newSubtaskInputs, setNewSubtaskInputs] = useState<Record<string, string>>({});
 
   const calendarDays = useMemo(() => {
     const firstDayIndex = new Date(viewYear, viewMonth, 1).getDay();
     const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
     const prevMonthDays = new Date(viewYear, viewMonth, 0).getDate();
 
-    const cells: { iso: string; dayNum: number; isCurrentMonth: boolean }[] =
-      [];
+    const cells: { iso: string; dayNum: number; isCurrentMonth: boolean }[] = [];
 
     for (let i = firstDayIndex - 1; i >= 0; i--) {
       const day = prevMonthDays - i;
       const m = viewMonth === 0 ? 12 : viewMonth;
       const y = viewMonth === 0 ? viewYear - 1 : viewYear;
       cells.push({
-        iso: `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(
-          2,
-          '0'
-        )}`,
+        iso: `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
         dayNum: day,
         isCurrentMonth: false,
       });
@@ -120,10 +121,7 @@ export default function CalendarGoalsPanel() {
       const m = viewMonth === 11 ? 1 : viewMonth + 2;
       const y = viewMonth === 11 ? viewYear + 1 : viewYear;
       cells.push({
-        iso: `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(
-          2,
-          '0'
-        )}`,
+        iso: `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
         dayNum: day,
         isCurrentMonth: false,
       });
@@ -132,24 +130,35 @@ export default function CalendarGoalsPanel() {
     return cells;
   }, [viewYear, viewMonth]);
 
-  const last14Days = useMemo(() => {
+  const heatmapDays = useMemo(() => {
     const [y, m, d] = todayIso.split('-').map(Number);
-    const list: { iso: string; label: string; active: boolean }[] = [];
+    const count = heatmapRange === '14d' ? 14 : 90;
+    const list: { iso: string; label: string; score: number }[] = [];
     const shortDays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    for (let i = 13; i >= 0; i--) {
+
+    for (let i = count - 1; i >= 0; i--) {
       const dt = new Date(y, m - 1, d - i);
       const yr = dt.getFullYear();
       const mo = String(dt.getMonth() + 1).padStart(2, '0');
       const da = String(dt.getDate()).padStart(2, '0');
       const iso = `${yr}-${mo}-${da}`;
+      const score = activityMap[iso] || (activityDates.includes(iso) ? 1 : 0);
       list.push({
         iso,
         label: shortDays[dt.getDay()],
-        active: activityDates.includes(iso),
+        score,
       });
     }
     return list;
-  }, [todayIso, activityDates]);
+  }, [todayIso, heatmapRange, activityMap, activityDates]);
+
+  const getHeatmapColor = (score: number) => {
+    if (score === 0) return 'bg-slate-900 border-slate-800/80';
+    if (score === 1) return 'bg-emerald-950/90 border-emerald-900/60';
+    if (score <= 3) return 'bg-emerald-700/80 border-emerald-600/70';
+    if (score <= 5) return 'bg-emerald-500/90 border-emerald-400/80';
+    return 'bg-emerald-300 text-slate-950 border-emerald-200 font-bold';
+  };
 
   const notesForSelectedDate = useMemo(
     () => notes.filter((n) => n.targetDate === selectedDate),
@@ -188,12 +197,17 @@ export default function CalendarGoalsPanel() {
   const handleCreateGoal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!goalTitle.trim()) return;
+    const parsedTarget = parseInt(goalTargetCount, 10);
     addGoal({
       title: goalTitle.trim(),
       category: goalCategory,
       deadline: goalDeadline,
+      targetCount: !isNaN(parsedTarget) && parsedTarget > 0 ? parsedTarget : 0,
+      currentCount: 0,
+      subtasks: [],
     });
     setGoalTitle('');
+    setGoalTargetCount('');
   };
 
   const handleOpenNote = (noteId: string) => {
@@ -210,6 +224,13 @@ export default function CalendarGoalsPanel() {
     });
     setActiveNoteId(id);
     setMobileTab('notes');
+  };
+
+  const handleAddSubtaskSubmit = (goalId: string) => {
+    const val = (newSubtaskInputs[goalId] || '').trim();
+    if (!val) return;
+    addSubtask(goalId, val);
+    setNewSubtaskInputs((prev) => ({ ...prev, [goalId]: '' }));
   };
 
   const getDeadlineBadge = (deadline?: string, completed?: boolean) => {
@@ -274,20 +295,45 @@ export default function CalendarGoalsPanel() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1 rounded-xl shrink-0">
-            <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-            <span className="text-xs font-mono font-bold text-amber-300">
-              {streak}d
-            </span>
-            {!activityDates.includes(todayIso) && (
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1 rounded-xl">
+              <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <span className="text-xs font-mono font-bold text-amber-300">
+                {streak}d
+              </span>
+              {!activityDates.includes(todayIso) ? (
+                <button
+                  type="button"
+                  onClick={logTodayStreak}
+                  className="ml-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-mono font-semibold text-[10px] transition-colors"
+                  title="Log today's streak"
+                >
+                  +1
+                </button>
+              ) : (
+                <span
+                  className="ml-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-mono font-semibold text-[10px] border border-emerald-500/20"
+                  title="Streak active for today"
+                >
+                  ✓
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 px-2 py-1 rounded-xl">
+              <Shield className="w-3.5 h-3.5 text-sky-400" />
+              <span className="text-xs font-mono font-bold text-sky-300">
+                {streakFreezes}
+              </span>
               <button
                 type="button"
-                onClick={logTodayStreak}
-                className="ml-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-mono font-semibold text-[10px] transition-colors"
+                onClick={consumeStreakFreeze}
+                className="ml-1 px-1.5 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-mono text-[10px] border border-sky-500/30 transition-colors"
+                title="Consume Shield to protect a missed day"
               >
-                +1
+                Shield
               </button>
-            )}
+            </div>
           </div>
         </div>
 
@@ -343,37 +389,85 @@ export default function CalendarGoalsPanel() {
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5">
         {activeSubTab === 'calendar' ? (
           <>
-            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3 text-emerald-400" />
-                  14d Activity Matrix
+                  Activity & Focus Intensity
                 </span>
-                <span className="text-[10px] font-mono text-emerald-400">
-                  {activityDates.length} active days
-                </span>
-              </div>
-              <div className="grid grid-cols-14 gap-1">
-                {last14Days.map((d) => (
+                <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
                   <button
-                    key={d.iso}
                     type="button"
-                    onClick={() => setSelectedDate(d.iso)}
-                    title={d.iso}
-                    className="flex flex-col items-center gap-1 group"
+                    onClick={() => setHeatmapRange('14d')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-mono transition-colors ${
+                      heatmapRange === '14d'
+                        ? 'bg-sky-400 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
                   >
-                    <div
-                      className={`w-full aspect-square rounded-sm border transition-all ${
-                        d.active
-                          ? 'bg-emerald-400/90 border-emerald-300'
-                          : 'bg-slate-900 border-slate-800 group-hover:border-slate-700'
-                      } ${selectedDate === d.iso ? 'ring-1 ring-sky-400' : ''}`}
-                    />
-                    <span className="text-[9px] font-mono text-slate-500">
-                      {d.label}
-                    </span>
+                    14d
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => setHeatmapRange('90d')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-mono transition-colors ${
+                      heatmapRange === '90d'
+                        ? 'bg-sky-400 text-slate-950 font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    90d
+                  </button>
+                </div>
+              </div>
+
+              {heatmapRange === '14d' ? (
+                <div className="grid grid-cols-14 gap-1">
+                  {heatmapDays.map((d) => (
+                    <button
+                      key={d.iso}
+                      type="button"
+                      onClick={() => setSelectedDate(d.iso)}
+                      title={`${d.iso}: ${d.score} intensity`}
+                      className="flex flex-col items-center gap-1 group"
+                    >
+                      <div
+                        className={`w-full aspect-square rounded-sm border transition-all ${getHeatmapColor(
+                          d.score
+                        )} ${selectedDate === d.iso ? 'ring-1 ring-sky-400' : ''}`}
+                      />
+                      <span className="text-[9px] font-mono text-slate-500">
+                        {d.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-18 gap-1">
+                  {heatmapDays.map((d) => (
+                    <button
+                      key={d.iso}
+                      type="button"
+                      onClick={() => setSelectedDate(d.iso)}
+                      title={`${d.iso}: ${d.score} intensity`}
+                      className={`w-full aspect-square rounded-xs border transition-all ${getHeatmapColor(
+                        d.score
+                      )} ${selectedDate === d.iso ? 'ring-1 ring-sky-400' : ''}`}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-900">
+                <span>Low</span>
+                <div className="flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 border border-slate-800" />
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-950 border border-emerald-900" />
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-700 border border-emerald-600" />
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 border border-emerald-400" />
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-300 border border-emerald-200" />
+                </div>
+                <span>High</span>
               </div>
             </div>
 
@@ -526,12 +620,12 @@ export default function CalendarGoalsPanel() {
                 type="text"
                 value={goalTitle}
                 onChange={(e) => setGoalTitle(e.target.value)}
-                placeholder="New sprint target, architecture goal, or milestone..."
+                placeholder="New sprint target, architecture milestone, or habit..."
                 className="w-full bg-slate-900 border border-slate-800 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-slate-100 outline-none"
               />
 
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <CustomSelect
                     value={goalCategory}
                     onChange={(val) => setGoalCategory(val as GoalCategory)}
@@ -542,6 +636,14 @@ export default function CalendarGoalsPanel() {
                     fallbackDate={todayIso}
                     onChange={setGoalDeadline}
                     placeholder="Optional deadline"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={goalTargetCount}
+                    onChange={(e) => setGoalTargetCount(e.target.value)}
+                    placeholder="Target count"
+                    className="w-24 bg-slate-900 border border-slate-800 focus:border-sky-400 rounded-xl px-2.5 py-1.5 text-xs text-slate-100 font-mono outline-none"
                   />
                 </div>
 
@@ -556,66 +658,236 @@ export default function CalendarGoalsPanel() {
 
             <div className="space-y-2">
               <AnimatePresence mode="popLayout">
-                {goals.map((goal) => (
-                  <motion.div
-                    key={goal.id}
-                    layout
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96 }}
-                    className={`flex items-center justify-between gap-3 p-3 rounded-xl border transition-all ${
-                      goal.completed
-                        ? 'bg-slate-900/30 border-slate-800/50 opacity-60'
-                        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleGoal(goal.id)}
-                        className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0 ${
-                          goal.completed
-                            ? 'bg-emerald-400 border-emerald-400 text-slate-950'
-                            : 'border-slate-600 hover:border-emerald-400 bg-slate-950'
-                        }`}
-                      >
-                        {goal.completed && (
-                          <Check className="w-3.5 h-3.5 stroke-3" />
-                        )}
-                      </button>
-                      <div className="min-w-0 flex-1">
-                        <p
-                          onClick={() => toggleGoal(goal.id)}
-                          className={`text-xs font-medium cursor-pointer ${
-                            goal.completed
-                              ? 'line-through text-slate-500'
-                              : 'text-slate-100'
-                          }`}
-                        >
-                          {goal.title}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                          <span
-                            className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
-                              CATEGORY_COLORS[goal.category]
+                {goals.map((goal) => {
+                  const isExpanded = expandedGoalId === goal.id;
+                  const totalSubtasks = (goal.subtasks || []).length;
+                  const completedSubtasks = (goal.subtasks || []).filter(
+                    (s) => s.completed
+                  ).length;
+
+                  let progressPercent = 0;
+                  if (goal.targetCount && goal.targetCount > 0) {
+                    progressPercent = Math.min(
+                      100,
+                      Math.round(
+                        ((goal.currentCount || 0) / goal.targetCount) * 100
+                      )
+                    );
+                  } else if (totalSubtasks > 0) {
+                    progressPercent = Math.round(
+                      (completedSubtasks / totalSubtasks) * 100
+                    );
+                  } else {
+                    progressPercent = goal.completed ? 100 : 0;
+                  }
+
+                  return (
+                    <motion.div
+                      key={goal.id}
+                      layout
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      className={`p-3 rounded-xl border transition-all ${
+                        goal.completed
+                          ? 'bg-slate-900/30 border-slate-800/50 opacity-70'
+                          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleGoal(goal.id)}
+                            className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0 ${
+                              goal.completed
+                                ? 'bg-emerald-400 border-emerald-400 text-slate-950'
+                                : 'border-slate-600 hover:border-emerald-400 bg-slate-950'
                             }`}
                           >
-                            {goal.category}
-                          </span>
-                          {getDeadlineBadge(goal.deadline, goal.completed)}
+                            {goal.completed && (
+                              <Check className="w-3.5 h-3.5 stroke-3" />
+                            )}
+                          </button>
+                          <div className="min-w-0 flex-1">
+                            <p
+                              onClick={() => toggleGoal(goal.id)}
+                              className={`text-xs font-medium cursor-pointer ${
+                                goal.completed
+                                  ? 'line-through text-slate-500'
+                                  : 'text-slate-100'
+                              }`}
+                            >
+                              {goal.title}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              <span
+                                className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
+                                  CATEGORY_COLORS[goal.category]
+                                }`}
+                              >
+                                {goal.category}
+                              </span>
+                              {getDeadlineBadge(goal.deadline, goal.completed)}
+                              {totalSubtasks > 0 && (
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-sky-300">
+                                  {completedSubtasks}/{totalSubtasks} tasks
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedGoalId(isExpanded ? null : goal.id)
+                            }
+                            className={`p-1.5 rounded-lg border transition-colors ${
+                              isExpanded
+                                ? 'bg-sky-500/15 border-sky-400/40 text-sky-400'
+                                : 'text-slate-400 hover:bg-slate-800 border-slate-800'
+                            }`}
+                            title="Sub-milestones"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteGoal(goal.id)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => deleteGoal(goal.id)}
-                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </motion.div>
-                ))}
+                      <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800/80 mt-2.5">
+                        <motion.div
+                          initial={false}
+                          animate={{ width: `${progressPercent}%` }}
+                          className="h-full bg-linear-to-r from-sky-400 to-emerald-400 rounded-full"
+                        />
+                      </div>
+
+                      {typeof goal.targetCount === 'number' &&
+                        goal.targetCount > 0 && (
+                          <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/60 text-[11px] font-mono">
+                            <span className="text-slate-400">
+                              Target progress:
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-200 font-semibold">
+                                {goal.currentCount || 0} / {goal.targetCount}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGoalProgress(
+                                    goal.id,
+                                    (goal.currentCount || 0) - 1
+                                  )
+                                }
+                                className="w-5 h-5 rounded flex items-center justify-center bg-slate-800 text-slate-300 hover:bg-slate-700"
+                              >
+                                -
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateGoalProgress(
+                                    goal.id,
+                                    (goal.currentCount || 0) + 1
+                                  )
+                                }
+                                className="w-5 h-5 rounded flex items-center justify-center bg-slate-800 text-slate-300 hover:bg-slate-700"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-2 font-mono"
+                          >
+                            <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
+                              Sub-Milestones
+                            </span>
+
+                            {(goal.subtasks || []).map((st) => (
+                              <div
+                                key={st.id}
+                                className="flex items-center justify-between gap-2 pl-2 pr-1 py-1 rounded-lg bg-slate-950/60 border border-slate-800/70"
+                              >
+                                <label className="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
+                                  <input
+                                    type="checkbox"
+                                    checked={st.completed}
+                                    onChange={() =>
+                                      toggleSubtask(goal.id, st.id)
+                                    }
+                                    className="accent-sky-400 rounded cursor-pointer"
+                                  />
+                                  <span
+                                    className={`text-xs truncate ${
+                                      st.completed
+                                        ? 'line-through text-slate-500'
+                                        : 'text-slate-200'
+                                    }`}
+                                  >
+                                    {st.title}
+                                  </span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteSubtask(goal.id, st.id)}
+                                  className="p-1 text-slate-500 hover:text-rose-400"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+
+                            <div className="flex items-center gap-1.5 pt-1">
+                              <input
+                                type="text"
+                                value={newSubtaskInputs[goal.id] || ''}
+                                onChange={(e) =>
+                                  setNewSubtaskInputs((prev) => ({
+                                    ...prev,
+                                    [goal.id]: e.target.value,
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddSubtaskSubmit(goal.id);
+                                  }
+                                }}
+                                placeholder="Add step or milestone..."
+                                className="flex-1 bg-slate-950 border border-slate-800 focus:border-sky-400 rounded-lg px-2.5 py-1 text-xs text-slate-100 outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddSubtaskSubmit(goal.id)}
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-400 hover:bg-sky-300 text-slate-950"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
             </div>
           </div>
