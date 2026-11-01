@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -97,6 +97,7 @@ export default function NotepadPanel() {
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedFolderFilter, setSelectedFolderFilter] = useState<string>('all');
   const [isPreview, setIsPreview] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const toggleFolderCollapse = (folderName: string) => {
     setCollapsedFolders((prev) => ({
@@ -176,9 +177,26 @@ export default function NotepadPanel() {
 
   const insertSyntax = (snippet: string) => {
     if (!activeNote) return;
-    updateNote(activeNote.id, {
-      content: `${activeNote.content}\n${snippet}`,
-    });
+    const textarea = textareaRef.current;
+    if (textarea && document.activeElement === textarea) {
+      const start = textarea.selectionStart ?? activeNote.content.length;
+      const end = textarea.selectionEnd ?? activeNote.content.length;
+      const before = activeNote.content.slice(0, start);
+      const after = activeNote.content.slice(end);
+      const newContent = `${before}${snippet}${after}`;
+      updateNote(activeNote.id, { content: newContent });
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          const nextPos = start + snippet.length;
+          textareaRef.current.setSelectionRange(nextPos, nextPos);
+          textareaRef.current.focus();
+        }
+      });
+    } else {
+      updateNote(activeNote.id, {
+        content: `${activeNote.content}\n${snippet}`,
+      });
+    }
   };
 
   const toggleMarkdownTaskLine = (lineIndex: number) => {
@@ -689,99 +707,100 @@ export default function NotepadPanel() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-                {isPreview ? (
-                  <div className="space-y-2.5 text-xs sm:text-sm font-mono text-slate-200">
-                    {activeNote.content.split('\n').map((line, idx) => {
-                      if (line.startsWith('# '))
-                        return (
-                          <h1
-                            key={idx}
-                            className="text-lg font-bold text-slate-100 border-b border-slate-800 pb-1.5 mt-2"
-                          >
-                            {renderInlineMarkdown(line.slice(2))}
-                          </h1>
-                        );
-                      if (line.startsWith('## '))
-                        return (
-                          <h2
-                            key={idx}
-                            className={`text-base font-semibold ${theme.accentText} mt-3`}
-                          >
-                            {renderInlineMarkdown(line.slice(3))}
-                          </h2>
-                        );
-                      if (line.startsWith('```'))
-                        return (
-                          <div
-                            key={idx}
-                            className="text-[11px] text-emerald-400 bg-slate-900/90 px-2.5 py-1 rounded-md border border-slate-800 inline-block"
-                          >
-                            {line}
-                          </div>
-                        );
-                      if (line.startsWith('- [x] '))
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => toggleMarkdownTaskLine(idx)}
-                            className="flex items-center gap-2.5 text-slate-500 line-through cursor-pointer hover:text-slate-300 py-0.5"
-                          >
-                            <input
-                              type="checkbox"
-                              checked
-                              readOnly
-                              className="accent-emerald-400 rounded cursor-pointer"
-                            />
-                            <span>{renderInlineMarkdown(line.slice(6))}</span>
-                          </div>
-                        );
-                      if (line.startsWith('- [ ] '))
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => toggleMarkdownTaskLine(idx)}
-                            className="flex items-center gap-2.5 text-slate-100 cursor-pointer hover:text-sky-300 py-0.5"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={false}
-                              readOnly
-                              className="accent-sky-400 rounded cursor-pointer"
-                            />
-                            <span>{renderInlineMarkdown(line.slice(6))}</span>
-                          </div>
-                        );
-                      if (line.startsWith('- '))
-                        return (
-                          <div
-                            key={idx}
-                            className="flex items-start gap-2.5 text-slate-200 pl-1"
-                          >
-                            <span className={`${theme.accentText} mt-1`}>•</span>
-                            <span className="leading-relaxed">
-                              {renderInlineMarkdown(line.slice(2))}
-                            </span>
-                          </div>
-                        );
+              {isPreview ? (
+                <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-2.5 text-xs sm:text-sm font-mono text-slate-200">
+                  {activeNote.content.split('\n').map((line, idx) => {
+                    if (line.startsWith('# '))
                       return (
-                        <p key={idx} className="leading-relaxed">
-                          {line ? renderInlineMarkdown(line) : '\u00A0'}
-                        </p>
+                        <h1
+                          key={idx}
+                          className="text-lg font-bold text-slate-100 border-b border-slate-800 pb-1.5 mt-2"
+                        >
+                          {renderInlineMarkdown(line.slice(2))}
+                        </h1>
                       );
-                    })}
-                  </div>
-                ) : (
+                    if (line.startsWith('## '))
+                      return (
+                        <h2
+                          key={idx}
+                          className={`text-base font-semibold ${theme.accentText} mt-3`}
+                        >
+                          {renderInlineMarkdown(line.slice(3))}
+                        </h2>
+                      );
+                    if (line.startsWith('```'))
+                      return (
+                        <div
+                          key={idx}
+                          className="text-[11px] text-emerald-400 bg-slate-900/90 px-2.5 py-1 rounded-md border border-slate-800 inline-block"
+                        >
+                          {line}
+                        </div>
+                      );
+                    if (line.startsWith('- [x] '))
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => toggleMarkdownTaskLine(idx)}
+                          className="flex items-center gap-2.5 text-slate-500 line-through cursor-pointer hover:text-slate-300 py-0.5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked
+                            readOnly
+                            className="accent-emerald-400 rounded cursor-pointer"
+                          />
+                          <span>{renderInlineMarkdown(line.slice(6))}</span>
+                        </div>
+                      );
+                    if (line.startsWith('- [ ] '))
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => toggleMarkdownTaskLine(idx)}
+                          className="flex items-center gap-2.5 text-slate-100 cursor-pointer hover:text-sky-300 py-0.5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={false}
+                            readOnly
+                            className="accent-sky-400 rounded cursor-pointer"
+                          />
+                          <span>{renderInlineMarkdown(line.slice(6))}</span>
+                        </div>
+                      );
+                    if (line.startsWith('- '))
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-start gap-2.5 text-slate-200 pl-1"
+                        >
+                          <span className={`${theme.accentText} mt-1`}>•</span>
+                          <span className="leading-relaxed">
+                            {renderInlineMarkdown(line.slice(2))}
+                          </span>
+                        </div>
+                      );
+                    return (
+                      <p key={idx} className="leading-relaxed">
+                        {line ? renderInlineMarkdown(line) : '\u00A0'}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col p-4 sm:p-5 min-h-0 overflow-hidden">
                   <textarea
+                    ref={textareaRef}
                     value={activeNote.content}
                     onChange={(e) =>
                       updateNote(activeNote.id, { content: e.target.value })
                     }
                     placeholder="# Write markdown, dev logs, or - [ ] task lists..."
-                    className="w-full h-full min-h-85 bg-transparent resize-none outline-none text-xs sm:text-sm font-mono leading-relaxed text-slate-200"
+                    className="flex-1 w-full h-full bg-transparent resize-none outline-none text-xs sm:text-sm font-mono leading-relaxed text-slate-200 overflow-y-auto"
                   />
-                )}
-              </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">

@@ -524,9 +524,21 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         )
         .then(({ error }) => {
           setSyncStatus(error ? 'error' : 'synced');
+          if (error) {
+            console.error('Failed to sync workspace_meta with Supabase:', error);
+            if (
+              error.code === '55000' ||
+              error.message?.includes('replica identity')
+            ) {
+              pushToast(
+                'Database replica identity needed for workspace_meta. Please run the SQL migration.',
+                'error'
+              );
+            }
+          }
         });
     },
-    [user]
+    [user, pushToast]
   );
 
   const setCustomPomodoroMinutes = useCallback(
@@ -704,6 +716,37 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       setActivityMap(loadedMap);
       setStreakFreezes(loadedFreezes);
       setCustomPomodoroMinutesState(loadedPomo);
+
+      // Read local cache to ensure unsynced local streak/dates are never wiped out
+      let cachedDates: string[] = [];
+      let cachedMap: Record<string, number> = {};
+      try {
+        const cachedRaw = localStorage.getItem(globalCacheKey);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (Array.isArray(cached.activityDates)) cachedDates = cached.activityDates;
+          if (cached.activityMap && typeof cached.activityMap === 'object') cachedMap = cached.activityMap;
+        }
+      } catch {}
+
+      const mergedDates = Array.from(new Set([...cachedDates, ...loadedDates])).sort();
+      const mergedMap = { ...cachedMap, ...loadedMap };
+
+      if (mergedDates.length > 0) {
+        setActivityDates(mergedDates);
+        setActivityMap(mergedMap);
+      }
+
+      // If local cache had dates not yet saved to Supabase (e.g. from prior 500 error), re-sync them
+      if (mergedDates.length > loadedDates.length) {
+        syncMeta(
+          scratchpadRef.current,
+          mergedDates,
+          mergedMap,
+          loadedFreezes,
+          loadedPomo
+        );
+      }
     };
 
     fetchGlobalMeta();
@@ -722,10 +765,12 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
           if (payload.new) {
             const row = payload.new as DbWorkspaceMetaRow;
             if (Array.isArray(row.activity_dates)) {
-              setActivityDates(row.activity_dates);
+              setActivityDates((prev) =>
+                Array.from(new Set([...prev, ...row.activity_dates!])).sort()
+              );
             }
             if (row.activity_map && typeof row.activity_map === 'object') {
-              setActivityMap(row.activity_map);
+              setActivityMap((prev) => ({ ...prev, ...row.activity_map }));
             }
             if (typeof row.streak_freezes === 'number') {
               setStreakFreezes(row.streak_freezes);
@@ -742,7 +787,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [user, pushToast]);
+  }, [user, pushToast, syncMeta]);
 
   useEffect(() => {
     if (!user) return;
@@ -874,7 +919,37 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
             .then(({ data }) => {
               if (data) {
                 const freshNotes = (data as DbNoteRow[]).map(fromDbNote);
-                setNotes(freshNotes);
+                setNotes((currentNotes) => {
+                  return freshNotes.map((remoteNote) => {
+                    const localNote = currentNotes.find(
+                      (n) => n.id === remoteNote.id
+                    );
+                    if (!localNote) return remoteNote;
+
+                    // If local note has a pending debounce timer (active editing), protect in-flight typing
+                    if (noteTimersRef.current[remoteNote.id]) {
+                      return {
+                        ...remoteNote,
+                        content: localNote.content,
+                        title: localNote.title,
+                        folder: localNote.folder,
+                        tag: localNote.tag,
+                        pinned: localNote.pinned,
+                        targetDate: localNote.targetDate,
+                        updatedAt: localNote.updatedAt,
+                      };
+                    }
+
+                    // If local note timestamp is newer or identical, retain local version
+                    const localTime = new Date(localNote.updatedAt).getTime();
+                    const remoteTime = new Date(remoteNote.updatedAt).getTime();
+                    if (localTime >= remoteTime) {
+                      return localNote;
+                    }
+
+                    return remoteNote;
+                  });
+                });
               }
             });
         }
