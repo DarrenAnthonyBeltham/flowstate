@@ -75,6 +75,8 @@ export default function RoutinePanel() {
     setFocusedRoutineId,
     wrapUpDay,
     activityMap,
+    theme,
+    workspace,
   } = useFlowState();
 
   const [scheduleView, setScheduleView] = useState<'today' | 'all'>('today');
@@ -152,7 +154,7 @@ export default function RoutinePanel() {
     setTitle('');
     setTimeSlot('09:00');
     setPeriod('morning');
-    setCategory('Deep Work');
+    setCategory(workspace === 'private' ? 'Personal' : 'Deep Work');
     setPriority('medium');
     setSelectedDays(ALL_DAYS);
     setIsModalOpen(true);
@@ -165,7 +167,9 @@ export default function RoutinePanel() {
     setPeriod(item.period);
     setCategory(item.category);
     setPriority(item.priority);
-    setSelectedDays(item.daysOfWeek && item.daysOfWeek.length > 0 ? item.daysOfWeek : ALL_DAYS);
+    setSelectedDays(
+      item.daysOfWeek && item.daysOfWeek.length > 0 ? item.daysOfWeek : ALL_DAYS
+    );
     setIsModalOpen(true);
   };
 
@@ -217,7 +221,9 @@ export default function RoutinePanel() {
           <div>
             <h2 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
               <span>Daily Routine</span>
-              <span className="text-[10px] font-mono font-normal px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-sky-400">
+              <span
+                className={`text-[10px] font-mono font-normal px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 ${theme.accentText}`}
+              >
                 {currentDayOfWeek}
               </span>
             </h2>
@@ -237,7 +243,7 @@ export default function RoutinePanel() {
             <button
               type="button"
               onClick={openAddModal}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-mono font-semibold text-xs shadow-sm transition-all"
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl ${theme.accentBg} text-slate-950 font-mono font-semibold text-xs shadow-sm transition-all`}
             >
               <Plus className="w-3.5 h-3.5 stroke-3" />
               <span className="hidden sm:inline">Add</span>
@@ -252,7 +258,7 @@ export default function RoutinePanel() {
               onClick={() => setScheduleView('today')}
               className={`py-1 rounded-lg text-[11px] font-mono transition-colors ${
                 scheduleView === 'today'
-                  ? 'bg-sky-400 text-slate-950 font-semibold'
+                  ? `${theme.accentBg} text-slate-950 font-semibold`
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -263,7 +269,7 @@ export default function RoutinePanel() {
               onClick={() => setScheduleView('all')}
               className={`py-1 rounded-lg text-[11px] font-mono transition-colors ${
                 scheduleView === 'all'
-                  ? 'bg-sky-400 text-slate-950 font-semibold'
+                  ? `${theme.accentBg} text-slate-950 font-semibold`
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -281,7 +287,7 @@ export default function RoutinePanel() {
                   onClick={() => setSelectedPeriod(f.id)}
                   className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-medium transition-colors whitespace-nowrap border ${
                     active
-                      ? 'bg-sky-500/15 border-sky-400/40 text-sky-300'
+                      ? `${theme.accentBgSubtle} ${theme.accentBorder} ${theme.accentText}`
                       : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -310,7 +316,7 @@ export default function RoutinePanel() {
               <button
                 type="button"
                 onClick={openAddModal}
-                className="mt-2.5 text-xs font-mono font-medium text-sky-400 hover:underline"
+                className={`mt-2.5 text-xs font-mono font-medium ${theme.accentText} hover:underline`}
               >
                 + Create routine block
               </button>
@@ -325,11 +331,13 @@ export default function RoutinePanel() {
                 <React.Fragment key={item.id}>
                   {showNowDivider && currentTimeStr && (
                     <div className="flex items-center gap-2 py-1.5">
-                      <span className="h-px flex-1 bg-linear-to-r from-transparent via-sky-400/60 to-transparent" />
-                      <span className="text-[10px] font-mono text-sky-400 font-semibold px-2.5 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/30 shrink-0">
+                      <span className="h-px flex-1 bg-linear-to-r from-transparent via-slate-600 to-transparent" />
+                      <span
+                        className={`text-[10px] font-mono ${theme.accentText} font-semibold px-2.5 py-0.5 rounded-full ${theme.accentBgSubtle} border ${theme.accentBorder} shrink-0`}
+                      >
                         NOW — {currentTimeStr}
                       </span>
-                      <span className="h-px flex-1 bg-linear-to-r from-transparent via-sky-400/60 to-transparent" />
+                      <span className="h-px flex-1 bg-linear-to-r from-transparent via-slate-600 to-transparent" />
                     </div>
                   )}
 
@@ -343,9 +351,9 @@ export default function RoutinePanel() {
                       item.completed
                         ? 'bg-slate-900/30 border-slate-800/50 opacity-60'
                         : isActiveTimeBlock
-                        ? 'bg-slate-900/90 border-sky-400/80 shadow-[0_0_15px_rgba(56,189,248,0.15)] ring-1 ring-sky-400/50'
+                        ? `bg-slate-900/90 ${theme.accentBorder} ring-1 ${theme.accentRing}`
                         : isFocused
-                        ? 'bg-slate-900/90 border-amber-400/70 ring-1 ring-amber-400/40'
+                        ? `bg-slate-900/90 border-amber-400/70 ring-1 ring-amber-400/40`
                         : 'bg-slate-900/80 border-slate-800/90 hover:border-slate-700'
                     }`}
                   >
@@ -355,11 +363,13 @@ export default function RoutinePanel() {
                         onClick={() => toggleRoutine(item.id)}
                         className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0 ${
                           item.completed
-                            ? 'bg-sky-400 border-sky-400 text-slate-950'
+                            ? `${theme.accentBg} ${theme.accentBorder} text-slate-950`
                             : 'border-slate-600 hover:border-sky-400 bg-slate-950/60'
                         }`}
                       >
-                        {item.completed && <Check className="w-3.5 h-3.5 stroke-3" />}
+                        {item.completed && (
+                          <Check className="w-3.5 h-3.5 stroke-3" />
+                        )}
                       </button>
 
                       <div className="min-w-0 flex-1">
@@ -375,7 +385,9 @@ export default function RoutinePanel() {
                             {item.title}
                           </p>
                           {isActiveTimeBlock && !item.completed && (
-                            <span className="text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded bg-sky-400 text-slate-950">
+                            <span
+                              className={`text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded ${theme.accentBg} text-slate-950`}
+                            >
                               active
                             </span>
                           )}
@@ -383,7 +395,7 @@ export default function RoutinePanel() {
 
                         <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                           <span className="inline-flex items-center gap-1 text-[10px] font-mono text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
-                            <Clock className="w-2.5 h-2.5 text-sky-400" />
+                            <Clock className={`w-2.5 h-2.5 ${theme.accentText}`} />
                             {item.timeSlot}
                           </span>
                           <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-800/80 text-slate-300">
@@ -415,7 +427,7 @@ export default function RoutinePanel() {
                         }
                         className={`p-1.5 rounded-lg border transition-all ${
                           isFocused
-                            ? 'bg-sky-400 border-sky-300 text-slate-950 font-semibold shadow-sm'
+                            ? `${theme.accentBg} ${theme.accentBorder} text-slate-950 font-semibold shadow-sm`
                             : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800 border-slate-800'
                         }`}
                         title={
@@ -500,7 +512,7 @@ export default function RoutinePanel() {
                         onClick={() => toggleDay(d)}
                         className={`py-1.5 rounded-lg text-xs font-mono transition-colors border ${
                           active
-                            ? 'bg-sky-500/20 border-sky-400 text-sky-300 font-semibold'
+                            ? `${theme.accentBgSubtle} ${theme.accentBorder} ${theme.accentText} font-semibold`
                             : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
                         }`}
                       >
@@ -571,7 +583,7 @@ export default function RoutinePanel() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-mono font-semibold bg-sky-400 hover:bg-sky-300 text-slate-950"
+                  className={`px-5 py-2 rounded-xl text-xs font-mono font-semibold ${theme.accentBg} text-slate-950`}
                 >
                   {editingItem ? 'Save Changes' : 'Add Routine'}
                 </button>
@@ -590,7 +602,9 @@ export default function RoutinePanel() {
             >
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <div
+                    className={`w-8 h-8 rounded-xl ${theme.accentBgSubtle} border ${theme.accentBorder} flex items-center justify-center ${theme.accentText}`}
+                  >
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
@@ -614,7 +628,7 @@ export default function RoutinePanel() {
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider">
                     Routines Finished
                   </span>
-                  <div className="text-lg font-bold text-sky-400">
+                  <div className={`text-lg font-bold ${theme.accentText}`}>
                     {completedCount} / {routines.length}
                   </div>
                   <div className="text-[10px] text-slate-500">
@@ -640,7 +654,7 @@ export default function RoutinePanel() {
                   type="checkbox"
                   checked={rolloverTasks}
                   onChange={(e) => setRolloverTasks(e.target.checked)}
-                  className="mt-0.5 accent-sky-400 rounded cursor-pointer"
+                  className={`mt-0.5 ${theme.accentText} rounded cursor-pointer`}
                 />
                 <span className="text-xs text-slate-300 select-none">
                   Roll over unfinished high-priority tasks into tomorrow’s DevLog note.
@@ -658,7 +672,7 @@ export default function RoutinePanel() {
                 <button
                   type="button"
                   onClick={handleConfirmWrapUp}
-                  className="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-colors"
+                  className={`px-5 py-2 rounded-xl text-xs font-semibold ${theme.accentBg} text-slate-950 transition-colors`}
                 >
                   Complete Day & Reset
                 </button>

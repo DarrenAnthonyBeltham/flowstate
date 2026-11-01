@@ -23,11 +23,23 @@ import {
   VolumeX,
   Target,
   X,
+  Briefcase,
+  Home,
+  Sliders,
+  ChevronDown,
 } from 'lucide-react';
 import { useFlowState } from '@/context/FlowStateContext';
 import { ViewMode } from '@/types';
 
 type SoundMode = 'off' | 'brown' | 'rain' | 'drone';
+
+const POMODORO_PRESETS = [
+  { minutes: 15, label: '15m Sprint' },
+  { minutes: 25, label: '25m Standard' },
+  { minutes: 30, label: '30m Deep Work' },
+  { minutes: 45, label: '45m Flow State' },
+  { minutes: 60, label: '60m Architecture' },
+];
 
 export default function Header() {
   const {
@@ -48,22 +60,23 @@ export default function Header() {
     setFocusedRoutineId,
     routines,
     incrementRoutinePomodoro,
+    workspace,
+    setWorkspace,
+    theme,
+    customPomodoroMinutes,
+    setCustomPomodoroMinutes,
   } = useFlowState();
 
   const isTodayLogged = activityDates.includes(todayIso);
-
   const focusedRoutine = routines.find((r) => r.id === focusedRoutineId);
 
-  const handleStreakClick = () => {
-    logTodayStreak();
-    if (viewMode !== 'calendar' && isTodayLogged) {
-      setViewMode('calendar');
-    }
-  };
-
-  const [secondsLeft, setSecondsLeft] = useState(25 * 60);
+  const [secondsLeft, setSecondsLeft] = useState(customPomodoroMinutes * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [isBreak, setIsBreak] = useState(false);
+  const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
+  const [customInputMinutes, setCustomInputMinutes] = useState('');
+
+  const timerMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [soundMode, setSoundMode] = useState<SoundMode>('off');
@@ -75,10 +88,37 @@ export default function Header() {
   const activeSourcesRef = useRef<AudioNode[]>([]);
   const soundMenuContainerRef = useRef<HTMLDivElement>(null);
 
+  const handleStreakClick = () => {
+    logTodayStreak();
+    if (viewMode !== 'calendar' && isTodayLogged) {
+      setViewMode('calendar');
+    }
+  };
+
+  const handleSelectPomodoroPreset = (mins: number) => {
+    setCustomPomodoroMinutes(mins);
+    if (!isRunning) {
+      setSecondsLeft(mins * 60);
+    }
+    setIsTimerMenuOpen(false);
+  };
+
+  const handleCustomDurationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseInt(customInputMinutes, 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 180) {
+      handleSelectPomodoroPreset(parsed);
+      setCustomInputMinutes('');
+    }
+  };
+
   const stopActiveSounds = useCallback(() => {
     activeSourcesRef.current.forEach((node) => {
       try {
-        if ('stop' in node && typeof (node as AudioScheduledSourceNode).stop === 'function') {
+        if (
+          'stop' in node &&
+          typeof (node as AudioScheduledSourceNode).stop === 'function'
+        ) {
           (node as AudioScheduledSourceNode).stop();
         }
         node.disconnect();
@@ -91,7 +131,8 @@ export default function Header() {
     if (!audioContextRef.current) {
       const AudioCtx =
         window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
       if (AudioCtx) {
         const ctx = new AudioCtx();
         const gainNode = ctx.createGain();
@@ -101,7 +142,10 @@ export default function Header() {
         gainNodeRef.current = gainNode;
       }
     }
-    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+    if (
+      audioContextRef.current &&
+      audioContextRef.current.state === 'suspended'
+    ) {
       audioContextRef.current.resume();
     }
   }, [soundVolume]);
@@ -142,16 +186,23 @@ export default function Header() {
         const bufferSize = ctx.sampleRate * 4;
         const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
         const data = buffer.getChannelData(0);
-        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        let b0 = 0,
+          b1 = 0,
+          b2 = 0,
+          b3 = 0,
+          b4 = 0,
+          b5 = 0,
+          b6 = 0;
         for (let i = 0; i < bufferSize; i++) {
           const white = Math.random() * 2 - 1;
           b0 = 0.99886 * b0 + white * 0.0555179;
           b1 = 0.99332 * b1 + white * 0.0750759;
-          b2 = 0.96900 * b2 + white * 0.1538520;
-          b3 = 0.86650 * b3 + white * 0.3104856;
-          b4 = 0.55000 * b4 + white * 0.5329522;
-          b5 = -0.7616 * b5 - white * 0.0168980;
-          data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+          b2 = 0.969 * b2 + white * 0.153852;
+          b3 = 0.8665 * b3 + white * 0.3104856;
+          b4 = 0.55 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.016898;
+          data[i] =
+            (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
           b6 = white * 0.115926;
         }
         const noise = ctx.createBufferSource();
@@ -202,7 +253,10 @@ export default function Header() {
   const handleVolumeChange = (vol: number) => {
     setSoundVolume(vol);
     if (gainNodeRef.current && audioContextRef.current) {
-      gainNodeRef.current.gain.setValueAtTime(vol, audioContextRef.current.currentTime);
+      gainNodeRef.current.gain.setValueAtTime(
+        vol,
+        audioContextRef.current.currentTime
+      );
     }
   };
 
@@ -214,6 +268,12 @@ export default function Header() {
       ) {
         setIsSoundMenuOpen(false);
       }
+      if (
+        timerMenuRef.current &&
+        !timerMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsTimerMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
@@ -222,7 +282,10 @@ export default function Header() {
   useEffect(() => {
     return () => {
       stopActiveSounds();
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      if (
+        audioContextRef.current &&
+        audioContextRef.current.state !== 'closed'
+      ) {
         audioContextRef.current.close().catch(() => {});
       }
     };
@@ -241,13 +304,19 @@ export default function Header() {
             incrementRoutinePomodoro(focusedRoutineId);
           }
 
-          return nextBreak ? 5 * 60 : 25 * 60;
+          return nextBreak ? 5 * 60 : customPomodoroMinutes * 60;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [isRunning, isBreak, focusedRoutineId, incrementRoutinePomodoro]);
+  }, [
+    isRunning,
+    isBreak,
+    focusedRoutineId,
+    incrementRoutinePomodoro,
+    customPomodoroMinutes,
+  ]);
 
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60)
@@ -317,8 +386,10 @@ export default function Header() {
       );
     }
     return (
-      <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-        rls::synced
+      <span
+        className={`hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono border ${theme.badge}`}
+      >
+        rls::{workspace}
       </span>
     );
   };
@@ -327,21 +398,70 @@ export default function Header() {
     <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#070a12]/90 backdrop-blur-xl">
       <div className="max-w-[1720px] mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-linear-to-br from-sky-400 via-blue-500 to-emerald-400 p-px shadow-lg shadow-sky-500/15">
+          <div
+            className={`w-9 h-9 rounded-xl bg-linear-to-br ${theme.gradient} p-px shadow-lg ${theme.glow}`}
+          >
             <div className="w-full h-full bg-slate-950 rounded-xl flex items-center justify-center">
-              <Terminal className="w-4 h-4 text-sky-400" />
+              <Terminal className={`w-4 h-4 ${theme.accentText}`} />
             </div>
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-mono font-bold text-slate-100 tracking-tight text-sm sm:text-base">
-                flowstate<span className="text-sky-400">.dev</span>
+                flowstate
+                <span className={theme.accentText}>.dev</span>
               </h1>
               {renderSyncBadge()}
             </div>
             <p className="text-[11px] font-mono text-slate-400 hidden sm:block">
               {user?.email?.split('@')[0] || 'dev'} · target: {selectedDate}
             </p>
+          </div>
+
+          <div className="ml-2 flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-800/90">
+            <button
+              type="button"
+              onClick={() => setWorkspace('work')}
+              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors ${
+                workspace === 'work'
+                  ? 'text-slate-950 font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {workspace === 'work' && (
+                <motion.div
+                  layoutId="workspaceIndicator"
+                  transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                  className="absolute inset-0 bg-emerald-400 rounded-lg shadow-sm shadow-emerald-400/20"
+                />
+              )}
+              <span className="relative z-10 flex items-center gap-1">
+                <Briefcase className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Work</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setWorkspace('private')}
+              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors ${
+                workspace === 'private'
+                  ? 'text-slate-950 font-bold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {workspace === 'private' && (
+                <motion.div
+                  layoutId="workspaceIndicator"
+                  transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                  className="absolute inset-0 bg-amber-400 rounded-lg shadow-sm shadow-amber-400/20"
+                />
+              )}
+              <span className="relative z-10 flex items-center gap-1">
+                <Home className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Private</span>
+              </span>
+            </button>
           </div>
         </div>
 
@@ -361,7 +481,7 @@ export default function Header() {
                 <motion.div
                   layoutId="desktopViewTab"
                   transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                  className="absolute inset-0 bg-sky-400 rounded-lg"
+                  className={`absolute inset-0 rounded-lg ${theme.accentBg}`}
                 />
               )}
               <span className="relative z-10 flex items-center gap-1.5">
@@ -373,10 +493,17 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-xl">
+          <div
+            ref={timerMenuRef}
+            className="relative flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1.5 rounded-xl"
+          >
             <span
               className={`w-2 h-2 rounded-full ${
-                isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-sky-400'
+                isRunning
+                  ? 'bg-emerald-400 animate-pulse'
+                  : workspace === 'private'
+                  ? 'bg-amber-400'
+                  : 'bg-emerald-400'
               }`}
             />
             <div className="flex flex-col">
@@ -389,10 +516,20 @@ export default function Header() {
                     break
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIsTimerMenuOpen((prev) => !prev)}
+                  className="text-slate-500 hover:text-slate-300 p-0.5 rounded transition-colors"
+                  title="Configure Pomodoro duration"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
               </div>
               {focusedRoutine && (
-                <span className="text-[9px] font-mono text-sky-400 max-w-[110px] truncate flex items-center gap-1">
-                  <Target className="w-2.5 h-2.5 shrink-0 text-sky-400" />
+                <span
+                  className={`text-[9px] font-mono ${theme.accentText} max-w-[110px] truncate flex items-center gap-1`}
+                >
+                  <Target className={`w-2.5 h-2.5 shrink-0 ${theme.accentText}`} />
                   {focusedRoutine.title}
                 </span>
               )}
@@ -414,7 +551,7 @@ export default function Header() {
               onClick={() => {
                 setIsRunning(false);
                 setIsBreak(false);
-                setSecondsLeft(25 * 60);
+                setSecondsLeft(customPomodoroMinutes * 60);
               }}
               className="p-1 hover:bg-slate-800 rounded-md text-slate-400 hover:text-slate-200 transition-colors"
             >
@@ -431,6 +568,70 @@ export default function Header() {
                 <X className="w-3 h-3" />
               </button>
             )}
+
+            <AnimatePresence>
+              {isTimerMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                  className="absolute right-0 top-full mt-2 w-52 p-3 rounded-2xl bg-[#0c1222] border border-slate-800 shadow-2xl backdrop-blur-xl z-50 space-y-2.5 font-mono"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                      <Sliders className={`w-3.5 h-3.5 ${theme.accentText}`} />
+                      Focus Duration
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {customPomodoroMinutes}m
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    {POMODORO_PRESETS.map((preset) => (
+                      <button
+                        key={preset.minutes}
+                        type="button"
+                        onClick={() =>
+                          handleSelectPomodoroPreset(preset.minutes)
+                        }
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
+                          customPomodoroMinutes === preset.minutes
+                            ? `${theme.badge} font-bold`
+                            : 'text-slate-300 hover:bg-slate-800/80 hover:text-slate-100'
+                        }`}
+                      >
+                        <span>{preset.label}</span>
+                        {customPomodoroMinutes === preset.minutes && (
+                          <span className="text-[10px]">active</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  <form
+                    onSubmit={handleCustomDurationSubmit}
+                    className="pt-2 border-t border-slate-800/80 flex items-center gap-1.5"
+                  >
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      value={customInputMinutes}
+                      onChange={(e) => setCustomInputMinutes(e.target.value)}
+                      placeholder="Custom m"
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-sky-400 rounded-lg px-2 py-1 text-xs text-slate-100 outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${theme.accentBg} text-slate-950 transition-colors`}
+                    >
+                      Set
+                    </button>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div ref={soundMenuContainerRef} className="relative">
@@ -507,7 +708,9 @@ export default function Header() {
                       max="1"
                       step="0.05"
                       value={soundVolume}
-                      onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                      onChange={(e) =>
+                        handleVolumeChange(Number(e.target.value))
+                      }
                       className="w-full accent-sky-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                     />
                   </div>
@@ -519,15 +722,15 @@ export default function Header() {
           <button
             type="button"
             onClick={handleStreakClick}
-            className={`flex items-center gap-1.5 border px-2.5 py-1.5 rounded-xl text-xs font-mono font-semibold transition-all ${
+            className={`flex items-center gap-1.5 border px-2.5 py-1.5 rounded-xl text-xs font-mono font-semibold transition-all select-none ${
               isTodayLogged
                 ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-300 shadow-sm shadow-amber-500/10'
-                : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400 text-amber-200 animate-pulse'
+                : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400/30 animate-pulse'
             }`}
             title={
               isTodayLogged
-                ? `${streak}-day streak active for today! Click to view calendar.`
-                : 'Click to log today’s streak!'
+                ? `${streak}-day streak active! Click to view calendar.`
+                : 'Click to check in today (+1)!'
             }
           >
             <Flame
@@ -538,9 +741,13 @@ export default function Header() {
               }`}
             />
             <span>{streak}d</span>
-            {!isTodayLogged && (
-              <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1 rounded-sm">
-                +1
+            {!isTodayLogged ? (
+              <span className="text-[10px] bg-amber-400 text-slate-950 font-bold px-1.5 py-0.5 rounded-md shadow-xs">
+                Check in +1
+              </span>
+            ) : (
+              <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-semibold px-1.5 py-0.5 rounded-md border border-emerald-500/20">
+                Checked in ✓
               </span>
             )}
           </button>
@@ -550,7 +757,7 @@ export default function Header() {
             onClick={() => setIsScratchpadOpen(true)}
             className="hidden sm:flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-mono transition-all"
           >
-            <Zap className="w-3.5 h-3.5 text-sky-400" />
+            <Zap className={`w-3.5 h-3.5 ${theme.accentText}`} />
             <span className="hidden xl:inline">Scratchpad</span>
           </button>
 

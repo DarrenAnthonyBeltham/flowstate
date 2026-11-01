@@ -1,3 +1,5 @@
+export type WorkspaceType = 'work' | 'private';
+
 export type TimePeriod = 'morning' | 'afternoon' | 'evening' | 'anytime';
 export type Priority = 'low' | 'medium' | 'high';
 export type RoutineCategory = 'Health' | 'Deep Work' | 'Personal' | 'Mindfulness';
@@ -12,6 +14,7 @@ export interface RoutineItem {
   completed: boolean;
   daysOfWeek?: string[];
   pomodorosCompleted?: number;
+  workspace?: WorkspaceType;
 }
 
 export type NoteTag = 'Work' | 'Ideas' | 'Personal' | 'Journal' | 'DevLog';
@@ -27,13 +30,21 @@ export interface NoteItem {
   title: string;
   content: string;
   tag: NoteTag;
+  folder: string;
   pinned: boolean;
   targetDate?: string;
   updatedAt: string;
   versions?: NoteVersion[];
+  workspace?: WorkspaceType;
 }
 
-export type GoalCategory = 'Sprint' | 'System' | 'Fitness' | 'Personal';
+export type GoalCategory =
+  | 'Work'
+  | 'Private'
+  | 'Sprint'
+  | 'System'
+  | 'Fitness'
+  | 'Personal';
 
 export interface GoalSubtask {
   id: string;
@@ -50,6 +61,7 @@ export interface GoalItem {
   subtasks?: GoalSubtask[];
   targetCount?: number;
   currentCount?: number;
+  workspace?: WorkspaceType;
 }
 
 export type ViewMode = 'split' | 'calendar' | 'routine' | 'notes';
@@ -60,4 +72,16 @@ export interface ToastItem {
   id: string;
   message: string;
   type: 'success' | 'info' | 'error';
+}
+
+export interface WorkspaceTheme {
+  name: WorkspaceType;
+  accentText: string;
+  accentBorder: string;
+  accentBg: string;
+  accentBgSubtle: string;
+  accentRing: string;
+  badge: string;
+  gradient: string;
+  glow: string;
 }

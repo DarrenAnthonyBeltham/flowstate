@@ -38,17 +38,21 @@ const MONTH_NAMES = [
 ];
 
 const CATEGORY_COLORS: Record<GoalCategory, string> = {
+  Work: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  Private: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   Sprint: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
   System: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
-  Fitness: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  Personal: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  Fitness: 'bg-teal-500/15 text-teal-400 border-teal-500/30',
+  Personal: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
 };
 
 const GOAL_CATEGORY_OPTIONS = [
+  { value: 'Work', label: 'Work', dotColor: 'bg-emerald-400' },
+  { value: 'Private', label: 'Private', dotColor: 'bg-amber-400' },
   { value: 'Sprint', label: 'Sprint', dotColor: 'bg-sky-400' },
   { value: 'System', label: 'System', dotColor: 'bg-violet-400' },
-  { value: 'Fitness', label: 'Fitness', dotColor: 'bg-emerald-400' },
-  { value: 'Personal', label: 'Personal', dotColor: 'bg-amber-400' },
+  { value: 'Fitness', label: 'Fitness', dotColor: 'bg-teal-400' },
+  { value: 'Personal', label: 'Personal', dotColor: 'bg-rose-400' },
 ];
 
 export default function CalendarGoalsPanel() {
@@ -74,6 +78,8 @@ export default function CalendarGoalsPanel() {
     logTodayStreak,
     consumeStreakFreeze,
     setMobileTab,
+    theme,
+    workspace,
   } = useFlowState();
 
   const [activeSubTab, setActiveSubTab] = useState<'calendar' | 'goals'>('calendar');
@@ -82,7 +88,9 @@ export default function CalendarGoalsPanel() {
   const [viewMonth, setViewMonth] = useState(() => Number(selectedDate.slice(5, 7)) - 1);
 
   const [goalTitle, setGoalTitle] = useState('');
-  const [goalCategory, setGoalCategory] = useState<GoalCategory>('Sprint');
+  const [goalCategory, setGoalCategory] = useState<GoalCategory>(
+    workspace === 'private' ? 'Private' : 'Work'
+  );
   const [goalDeadline, setGoalDeadline] = useState<string | undefined>(undefined);
   const [goalTargetCount, setGoalTargetCount] = useState<string>('');
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
@@ -220,6 +228,7 @@ export default function CalendarGoalsPanel() {
       title: `log(${selectedDate}): Daily Dev & Tasks`,
       targetDate: selectedDate,
       tag: 'DevLog',
+      folder: 'General',
       content: `# Daily Log — ${selectedDate}\n\n## Priority Tasks\n- [ ] \n\n## Implementation & Notes\n\`\`\`ts\nconst status = "in_progress";\n\`\`\`\n`,
     });
     setActiveNoteId(id);
@@ -282,53 +291,54 @@ export default function CalendarGoalsPanel() {
       <div className="p-4 border-b border-slate-800/80 space-y-3 bg-slate-950/50">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/25 flex items-center justify-center text-sky-400 shrink-0">
+            <div
+              className={`w-8 h-8 rounded-xl ${theme.accentBgSubtle} border ${theme.accentBorder} flex items-center justify-center ${theme.accentText} shrink-0`}
+            >
               <CalendarIcon className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-bold text-slate-100 truncate">
                 Schedule & Milestones
               </h2>
-              <p className="text-[11px] font-mono text-sky-400 truncate">
+              <p className={`text-[11px] font-mono ${theme.accentText} truncate`}>
                 @{selectedDate}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 px-2.5 py-1 rounded-xl">
+            <button
+              type="button"
+              onClick={logTodayStreak}
+              className="flex items-center gap-1.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-800 px-2.5 py-1 rounded-xl transition-colors"
+              title="Click to manually log daily streak (+1)"
+            >
               <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
               <span className="text-xs font-mono font-bold text-amber-300">
                 {streak}d
               </span>
               {!activityDates.includes(todayIso) ? (
-                <button
-                  type="button"
-                  onClick={logTodayStreak}
-                  className="ml-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 font-mono font-semibold text-[10px] transition-colors"
-                  title="Log today's streak"
-                >
+                <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-mono font-bold text-[10px]">
                   +1
-                </button>
+                </span>
               ) : (
                 <span
                   className="ml-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-mono font-semibold text-[10px] border border-emerald-500/20"
-                  title="Streak active for today"
                 >
                   ✓
                 </span>
               )}
-            </div>
+            </button>
 
-            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 px-2 py-1 rounded-xl">
-              <Shield className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-xs font-mono font-bold text-sky-300">
+            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 px-2.5 py-1 rounded-xl">
+              <Shield className={`w-3.5 h-3.5 ${theme.accentText}`} />
+              <span className={`text-xs font-mono font-bold ${theme.accentText}`}>
                 {streakFreezes}
               </span>
               <button
                 type="button"
                 onClick={consumeStreakFreeze}
-                className="ml-1 px-1.5 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-mono text-[10px] border border-sky-500/30 transition-colors"
+                className={`ml-1 px-1.5 py-0.5 rounded-md ${theme.accentBgSubtle} ${theme.accentText} font-mono text-[10px] border ${theme.accentBorder} transition-colors`}
                 title="Consume Shield to protect a missed day"
               >
                 Shield
@@ -351,7 +361,7 @@ export default function CalendarGoalsPanel() {
               <motion.div
                 layoutId="calGoalSwitch"
                 transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                className="absolute inset-0 bg-sky-400 rounded-lg"
+                className={`absolute inset-0 ${theme.accentBg} rounded-lg`}
               />
             )}
             <span className="relative z-10 flex items-center justify-center gap-1.5">
@@ -373,7 +383,7 @@ export default function CalendarGoalsPanel() {
               <motion.div
                 layoutId="calGoalSwitch"
                 transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                className="absolute inset-0 bg-sky-400 rounded-lg"
+                className={`absolute inset-0 ${theme.accentBg} rounded-lg`}
               />
             )}
             <span className="relative z-10 flex items-center justify-center gap-1.5">
@@ -401,7 +411,7 @@ export default function CalendarGoalsPanel() {
                     onClick={() => setHeatmapRange('14d')}
                     className={`px-2 py-0.5 rounded text-[9px] font-mono transition-colors ${
                       heatmapRange === '14d'
-                        ? 'bg-sky-400 text-slate-950 font-bold'
+                        ? `${theme.accentBg} text-slate-950 font-bold`
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -412,7 +422,7 @@ export default function CalendarGoalsPanel() {
                     onClick={() => setHeatmapRange('90d')}
                     className={`px-2 py-0.5 rounded text-[9px] font-mono transition-colors ${
                       heatmapRange === '90d'
-                        ? 'bg-sky-400 text-slate-950 font-bold'
+                        ? `${theme.accentBg} text-slate-950 font-bold`
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -434,7 +444,7 @@ export default function CalendarGoalsPanel() {
                       <div
                         className={`w-full aspect-square rounded-sm border transition-all ${getHeatmapColor(
                           d.score
-                        )} ${selectedDate === d.iso ? 'ring-1 ring-sky-400' : ''}`}
+                        )} ${selectedDate === d.iso ? `ring-1 ${theme.accentRing}` : ''}`}
                       />
                       <span className="text-[9px] font-mono text-slate-500">
                         {d.label}
@@ -452,7 +462,7 @@ export default function CalendarGoalsPanel() {
                       title={`${d.iso}: ${d.score} intensity`}
                       className={`w-full aspect-square rounded-xs border transition-all ${getHeatmapColor(
                         d.score
-                      )} ${selectedDate === d.iso ? 'ring-1 ring-sky-400' : ''}`}
+                      )} ${selectedDate === d.iso ? `ring-1 ${theme.accentRing}` : ''}`}
                     />
                   ))}
                 </div>
@@ -480,7 +490,7 @@ export default function CalendarGoalsPanel() {
                   <button
                     type="button"
                     onClick={handleJumpToday}
-                    className="px-2 py-1 rounded-lg text-[10px] font-mono bg-slate-900 hover:bg-slate-800 text-sky-400 border border-slate-800"
+                    className={`px-2 py-1 rounded-lg text-[10px] font-mono bg-slate-900 hover:bg-slate-800 ${theme.accentText} border border-slate-800`}
                   >
                     today
                   </button>
@@ -525,7 +535,7 @@ export default function CalendarGoalsPanel() {
                       onClick={() => setSelectedDate(cell.iso)}
                       className={`relative h-9 rounded-lg flex flex-col items-center justify-center text-xs font-mono transition-all border ${
                         isSelected
-                          ? 'bg-sky-500/20 border-sky-400 text-sky-300 font-bold shadow-sm'
+                          ? `${theme.accentBgSubtle} ${theme.accentBorder} ${theme.accentText} font-bold shadow-sm`
                           : isToday
                           ? 'bg-slate-900 border-slate-700 text-slate-100 font-semibold'
                           : cell.isCurrentMonth
@@ -558,8 +568,7 @@ export default function CalendarGoalsPanel() {
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Goal
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{' '}
-                  Streak
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Streak
                 </span>
               </div>
             </div>
@@ -567,7 +576,7 @@ export default function CalendarGoalsPanel() {
             <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <h4 className="text-xs font-mono font-semibold text-sky-400 truncate">
+                  <h4 className={`text-xs font-mono font-semibold ${theme.accentText} truncate`}>
                     Inspector :: {selectedDate}
                   </h4>
                   <p className="text-[11px] text-slate-400">
@@ -578,7 +587,7 @@ export default function CalendarGoalsPanel() {
                 <button
                   type="button"
                   onClick={handleCreateNoteForDate}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold bg-sky-400 hover:bg-sky-300 text-slate-950 shrink-0 transition-all"
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold ${theme.accentBg} text-slate-950 shrink-0 transition-all`}
                 >
                   <Plus className="w-3.5 h-3.5 stroke-2" />
                   <span>Log Date</span>
@@ -594,7 +603,7 @@ export default function CalendarGoalsPanel() {
                       className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800 cursor-pointer group transition-colors"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <FileCode2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                        <FileCode2 className={`w-3.5 h-3.5 ${theme.accentText} shrink-0`} />
                         <span className="text-xs font-mono text-slate-200 truncate">
                           {n.title}
                         </span>
@@ -620,7 +629,7 @@ export default function CalendarGoalsPanel() {
                 type="text"
                 value={goalTitle}
                 onChange={(e) => setGoalTitle(e.target.value)}
-                placeholder="New sprint target, architecture milestone, or habit..."
+                placeholder="New target, sprint milestone, habit, or system objective..."
                 className="w-full bg-slate-900 border border-slate-800 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-slate-100 outline-none"
               />
 
@@ -649,7 +658,7 @@ export default function CalendarGoalsPanel() {
 
                 <button
                   type="submit"
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-mono font-semibold bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-colors"
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-semibold ${theme.accentBg} text-slate-950 transition-colors`}
                 >
                   + Add Goal
                 </button>
@@ -701,7 +710,7 @@ export default function CalendarGoalsPanel() {
                             onClick={() => toggleGoal(goal.id)}
                             className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0 ${
                               goal.completed
-                                ? 'bg-emerald-400 border-emerald-400 text-slate-950'
+                                ? `${theme.accentBg} ${theme.accentBorder} text-slate-950`
                                 : 'border-slate-600 hover:border-emerald-400 bg-slate-950'
                             }`}
                           >
@@ -723,7 +732,8 @@ export default function CalendarGoalsPanel() {
                             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                               <span
                                 className={`text-[10px] font-mono px-2 py-0.5 rounded-md border ${
-                                  CATEGORY_COLORS[goal.category]
+                                  CATEGORY_COLORS[goal.category] ||
+                                  'bg-slate-800 text-slate-300'
                                 }`}
                               >
                                 {goal.category}
@@ -746,7 +756,7 @@ export default function CalendarGoalsPanel() {
                             }
                             className={`p-1.5 rounded-lg border transition-colors ${
                               isExpanded
-                                ? 'bg-sky-500/15 border-sky-400/40 text-sky-400'
+                                ? `${theme.accentBgSubtle} ${theme.accentBorder} ${theme.accentText}`
                                 : 'text-slate-400 hover:bg-slate-800 border-slate-800'
                             }`}
                             title="Sub-milestones"
@@ -767,7 +777,7 @@ export default function CalendarGoalsPanel() {
                         <motion.div
                           initial={false}
                           animate={{ width: `${progressPercent}%` }}
-                          className="h-full bg-linear-to-r from-sky-400 to-emerald-400 rounded-full"
+                          className={`h-full bg-linear-to-r ${theme.gradient} rounded-full`}
                         />
                       </div>
 
@@ -801,7 +811,7 @@ export default function CalendarGoalsPanel() {
                                     (goal.currentCount || 0) + 1
                                   )
                                 }
-                                className="w-5 h-5 rounded flex items-center justify-center bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                className={`w-5 h-5 rounded flex items-center justify-center ${theme.accentBg} text-slate-950 font-bold`}
                               >
                                 +
                               </button>
@@ -809,82 +819,88 @@ export default function CalendarGoalsPanel() {
                           </div>
                         )}
 
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-2 font-mono"
-                          >
-                            <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
-                              Sub-Milestones
-                            </span>
+                      {isExpanded && (
+                        <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2 font-mono">
+                          <span className="text-[10px] text-slate-400 uppercase tracking-wider">
+                            Sub-tasks
+                          </span>
 
-                            {(goal.subtasks || []).map((st) => (
+                          <div className="space-y-1">
+                            {(goal.subtasks || []).map((subtask) => (
                               <div
-                                key={st.id}
-                                className="flex items-center justify-between gap-2 pl-2 pr-1 py-1 rounded-lg bg-slate-950/60 border border-slate-800/70"
+                                key={subtask.id}
+                                className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-950 border border-slate-800/80 text-xs"
                               >
-                                <label className="flex items-center gap-2 min-w-0 cursor-pointer flex-1">
-                                  <input
-                                    type="checkbox"
-                                    checked={st.completed}
-                                    onChange={() =>
-                                      toggleSubtask(goal.id, st.id)
-                                    }
-                                    className="accent-sky-400 rounded cursor-pointer"
-                                  />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleSubtask(goal.id, subtask.id)
+                                  }
+                                  className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                                >
+                                  <div
+                                    className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                                      subtask.completed
+                                        ? `${theme.accentBg} ${theme.accentBorder} text-slate-950`
+                                        : 'border-slate-600'
+                                    }`}
+                                  >
+                                    {subtask.completed && (
+                                      <Check className="w-2.5 h-2.5 stroke-3" />
+                                    )}
+                                  </div>
                                   <span
-                                    className={`text-xs truncate ${
-                                      st.completed
+                                    className={`truncate ${
+                                      subtask.completed
                                         ? 'line-through text-slate-500'
                                         : 'text-slate-200'
                                     }`}
                                   >
-                                    {st.title}
+                                    {subtask.title}
                                   </span>
-                                </label>
+                                </button>
                                 <button
                                   type="button"
-                                  onClick={() => deleteSubtask(goal.id, st.id)}
-                                  className="p-1 text-slate-500 hover:text-rose-400"
+                                  onClick={() =>
+                                    deleteSubtask(goal.id, subtask.id)
+                                  }
+                                  className="text-slate-500 hover:text-rose-400 p-0.5"
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </button>
                               </div>
                             ))}
+                          </div>
 
-                            <div className="flex items-center gap-1.5 pt-1">
-                              <input
-                                type="text"
-                                value={newSubtaskInputs[goal.id] || ''}
-                                onChange={(e) =>
-                                  setNewSubtaskInputs((prev) => ({
-                                    ...prev,
-                                    [goal.id]: e.target.value,
-                                  }))
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <input
+                              type="text"
+                              value={newSubtaskInputs[goal.id] || ''}
+                              onChange={(e) =>
+                                setNewSubtaskInputs((prev) => ({
+                                  ...prev,
+                                  [goal.id]: e.target.value,
+                                }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddSubtaskSubmit(goal.id);
                                 }
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleAddSubtaskSubmit(goal.id);
-                                  }
-                                }}
-                                placeholder="Add step or milestone..."
-                                className="flex-1 bg-slate-950 border border-slate-800 focus:border-sky-400 rounded-lg px-2.5 py-1 text-xs text-slate-100 outline-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleAddSubtaskSubmit(goal.id)}
-                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-400 hover:bg-sky-300 text-slate-950"
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                              }}
+                              placeholder="Add sub-task..."
+                              className="flex-1 bg-slate-950 border border-slate-800 focus:border-sky-400 rounded-lg px-2.5 py-1 text-xs text-slate-200 outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAddSubtaskSubmit(goal.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${theme.accentBg} text-slate-950`}
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   );
                 })}

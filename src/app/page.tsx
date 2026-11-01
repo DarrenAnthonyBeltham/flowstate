@@ -22,12 +22,13 @@ function WorkspaceContent() {
     mobileTab,
     toasts,
     dismissToast,
+    workspace,
   } = useFlowState();
 
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#060911] flex flex-col items-center justify-center gap-3 font-mono">
-        <div className="w-8 h-8 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+        <div className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
         <span className="text-xs text-slate-400">
           verifying supabase auth session...
         </span>
@@ -36,23 +37,33 @@ function WorkspaceContent() {
   }
 
   if (!user) {
-    return <AuthScreen/>;
+    return <AuthScreen />;
   }
 
   if (!isHydrated) {
     return (
       <div className="min-h-screen bg-[#060911] flex flex-col items-center justify-center gap-3 font-mono">
-        <div className="w-8 h-8 rounded-full border-2 border-sky-400 border-t-transparent animate-spin" />
+        <div
+          className={`w-8 h-8 rounded-full border-2 ${
+            workspace === 'private' ? 'border-amber-400' : 'border-emerald-400'
+          } border-t-transparent animate-spin`}
+        />
         <span className="text-xs text-slate-400">
-          decrypting & hydrating workspace...
+          decrypting & hydrating {workspace} workspace...
         </span>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen lg:h-screen flex flex-col bg-[#060911] text-slate-100 overflow-x-hidden">
-      <Header/>
+    <div
+      className={`min-h-screen lg:h-screen flex flex-col bg-[#060911] text-slate-100 overflow-x-hidden ${
+        workspace === 'private'
+          ? 'selection:bg-amber-500/30 selection:text-amber-200'
+          : 'selection:bg-emerald-500/30 selection:text-emerald-200'
+      }`}
+    >
+      <Header />
 
       <main className="flex-1 max-w-[1720px] w-full mx-auto p-3 sm:p-4 pb-20 lg:pb-4 min-h-0 flex flex-col">
         <div className="hidden lg:grid lg:grid-cols-12 gap-4 flex-1 min-h-0">
@@ -60,17 +71,17 @@ function WorkspaceContent() {
             <>
               <div className="col-span-3 h-full min-h-0">
                 <ErrorBoundary fallbackTitle="Calendar Panel Error">
-                  <CalendarGoalsPanel/>
+                  <CalendarGoalsPanel />
                 </ErrorBoundary>
               </div>
               <div className="col-span-4 h-full min-h-0">
                 <ErrorBoundary fallbackTitle="Routine Panel Error">
-                  <RoutinePanel/>
+                  <RoutinePanel />
                 </ErrorBoundary>
               </div>
               <div className="col-span-5 h-full min-h-0">
                 <ErrorBoundary fallbackTitle="Notepad Panel Error">
-                  <NotepadPanel/>
+                  <NotepadPanel />
                 </ErrorBoundary>
               </div>
             </>
@@ -79,7 +90,7 @@ function WorkspaceContent() {
           {viewMode === 'calendar' && (
             <div className="col-span-12 h-full min-h-0">
               <ErrorBoundary fallbackTitle="Calendar Panel Error">
-                <CalendarGoalsPanel/>
+                <CalendarGoalsPanel />
               </ErrorBoundary>
             </div>
           )}
@@ -87,7 +98,7 @@ function WorkspaceContent() {
           {viewMode === 'routine' && (
             <div className="col-span-12 h-full min-h-0">
               <ErrorBoundary fallbackTitle="Routine Panel Error">
-                <RoutinePanel/>
+                <RoutinePanel />
               </ErrorBoundary>
             </div>
           )}
@@ -95,7 +106,7 @@ function WorkspaceContent() {
           {viewMode === 'notes' && (
             <div className="col-span-12 h-full min-h-0">
               <ErrorBoundary fallbackTitle="Notepad Panel Error">
-                <NotepadPanel/>
+                <NotepadPanel />
               </ErrorBoundary>
             </div>
           )}
@@ -104,24 +115,24 @@ function WorkspaceContent() {
         <div className="flex lg:hidden flex-col flex-1 min-h-0">
           {mobileTab === 'routine' && (
             <ErrorBoundary fallbackTitle="Routine Panel Error">
-              <RoutinePanel/>
+              <RoutinePanel />
             </ErrorBoundary>
           )}
           {mobileTab === 'calendar' && (
             <ErrorBoundary fallbackTitle="Calendar Panel Error">
-              <CalendarGoalsPanel/>
+              <CalendarGoalsPanel />
             </ErrorBoundary>
           )}
           {mobileTab === 'notes' && (
             <ErrorBoundary fallbackTitle="Notepad Panel Error">
-              <NotepadPanel/>
+              <NotepadPanel />
             </ErrorBoundary>
           )}
         </div>
       </main>
 
-      <ScratchpadDrawer/>
-      <MobileNav/>
+      <ScratchpadDrawer />
+      <MobileNav />
 
       <div className="fixed bottom-20 lg:bottom-5 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none">
         <AnimatePresence>
@@ -135,13 +146,13 @@ function WorkspaceContent() {
             >
               <div className="flex items-center gap-2 min-w-0">
                 {t.type === 'success' && (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 )}
                 {t.type === 'info' && (
-                  <Info className="w-4 h-4 text-sky-400 shrink-0"/>
+                  <Info className="w-4 h-4 text-sky-400 shrink-0" />
                 )}
                 {t.type === 'error' && (
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0"/>
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                 )}
                 <span className="text-slate-200 truncate">{t.message}</span>
               </div>
@@ -150,7 +161,7 @@ function WorkspaceContent() {
                 onClick={() => dismissToast(t.id)}
                 className="text-slate-500 hover:text-slate-300 shrink-0"
               >
-                <X className="w-3.5 h-3.5"/>
+                <X className="w-3.5 h-3.5" />
               </button>
             </motion.div>
           ))}
@@ -163,7 +174,7 @@ function WorkspaceContent() {
 export default function Page() {
   return (
     <FlowStateProvider>
-      <WorkspaceContent/>
+      <WorkspaceContent />
     </FlowStateProvider>
   );
 }

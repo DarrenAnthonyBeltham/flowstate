@@ -11,6 +11,8 @@ import React, {
 } from 'react';
 import type { User } from '@supabase/supabase-js';
 import {
+  WorkspaceType,
+  WorkspaceTheme,
   RoutineItem,
   NoteItem,
   NoteVersion,
@@ -34,6 +36,10 @@ interface FlowStateContextType {
   isHydrated: boolean;
   syncStatus: SyncStatus;
   toasts: ToastItem[];
+  workspace: WorkspaceType;
+  theme: WorkspaceTheme;
+  customPomodoroMinutes: number;
+  folders: string[];
   routines: RoutineItem[];
   notes: NoteItem[];
   goals: GoalItem[];
@@ -49,6 +55,9 @@ interface FlowStateContextType {
   mobileTab: MobileTab;
   isScratchpadOpen: boolean;
   focusedRoutineId: string | null;
+  setWorkspace: (ws: WorkspaceType) => void;
+  setCustomPomodoroMinutes: (minutes: number) => void;
+  addFolder: (folderName: string) => void;
   setSelectedDate: (date: string) => void;
   setActiveNoteId: (id: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -90,6 +99,7 @@ interface FlowStateContextType {
 interface DbRoutineRow {
   id: string;
   user_id?: string;
+  workspace?: WorkspaceType;
   title: string;
   time_slot: string;
   period: TimePeriod;
@@ -103,6 +113,8 @@ interface DbRoutineRow {
 interface DbNoteRow {
   id: string;
   user_id?: string;
+  workspace?: WorkspaceType;
+  folder?: string;
   title: string;
   content: string;
   tag: NoteTag;
@@ -115,6 +127,7 @@ interface DbNoteRow {
 interface DbGoalRow {
   id: string;
   user_id?: string;
+  workspace?: WorkspaceType;
   title: string;
   category: GoalCategory;
   deadline: string | null;
@@ -122,6 +135,18 @@ interface DbGoalRow {
   subtasks?: GoalSubtask[];
   target_count?: number;
   current_count?: number;
+}
+
+interface DbWorkspaceMetaRow {
+  user_id: string;
+  scratchpad?: string;
+  streak?: number;
+  activity_dates?: string[];
+  activity_map?: Record<string, number>;
+  streak_freezes?: number;
+  custom_pomodoro_minutes?: number;
+  last_active_date?: string | null;
+  updated_at?: string;
 }
 
 const FALLBACK_DATE = '2026-10-18';
@@ -149,11 +174,10 @@ export const calculateStreak = (
   };
 
   const [y, m, d] = todayIso.split('-').map(Number);
-  const today = new Date(y, m - 1, d);
+  const checkDate = new Date(y, m - 1, d, 12, 0, 0);
 
   const isTodayActive = dateSet.has(todayIso);
 
-  const checkDate = new Date(today);
   if (!isTodayActive) {
     checkDate.setDate(checkDate.getDate() - 1);
     const yesterdayIso = formatDate(checkDate);
@@ -176,9 +200,14 @@ export const calculateStreak = (
   return count;
 };
 
-const toDbRoutine = (r: RoutineItem, userId: string): DbRoutineRow => ({
+const toDbRoutine = (
+  r: RoutineItem,
+  userId: string,
+  workspace: WorkspaceType
+): DbRoutineRow => ({
   id: r.id,
   user_id: userId,
+  workspace: r.workspace || workspace,
   title: r.title,
   time_slot: r.timeSlot,
   period: r.period,
@@ -210,11 +239,18 @@ const fromDbRoutine = (row: DbRoutineRow): RoutineItem => ({
     : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   pomodorosCompleted:
     typeof row.pomodoros_completed === 'number' ? row.pomodoros_completed : 0,
+  workspace: row.workspace || 'work',
 });
 
-const toDbNote = (n: NoteItem, userId: string): DbNoteRow => ({
+const toDbNote = (
+  n: NoteItem,
+  userId: string,
+  workspace: WorkspaceType
+): DbNoteRow => ({
   id: n.id,
   user_id: userId,
+  workspace: n.workspace || workspace,
+  folder: n.folder || 'General',
   title: n.title,
   content: n.content,
   tag: n.tag,
@@ -229,15 +265,22 @@ const fromDbNote = (row: DbNoteRow): NoteItem => ({
   title: row.title,
   content: row.content,
   tag: row.tag,
+  folder: row.folder || 'General',
   pinned: row.pinned,
   targetDate: row.target_date || undefined,
   versions: Array.isArray(row.versions) ? row.versions : [],
   updatedAt: row.updated_at,
+  workspace: row.workspace || 'work',
 });
 
-const toDbGoal = (g: GoalItem, userId: string): DbGoalRow => ({
+const toDbGoal = (
+  g: GoalItem,
+  userId: string,
+  workspace: WorkspaceType
+): DbGoalRow => ({
   id: g.id,
   user_id: userId,
+  workspace: g.workspace || workspace,
   title: g.title,
   category: g.category,
   deadline: g.deadline || null,
@@ -256,6 +299,7 @@ const fromDbGoal = (row: DbGoalRow): GoalItem => ({
   subtasks: Array.isArray(row.subtasks) ? row.subtasks : [],
   targetCount: typeof row.target_count === 'number' ? row.target_count : 0,
   currentCount: typeof row.current_count === 'number' ? row.current_count : 0,
+  workspace: row.workspace || 'work',
 });
 
 const FlowStateContext = createContext<FlowStateContextType | undefined>(
@@ -269,8 +313,34 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const [todayIso, setTodayIso] = useState<string>(FALLBACK_DATE);
-  const [selectedDate, setSelectedDate] = useState<string>(FALLBACK_DATE);
+  const [workspace, setWorkspaceState] = useState<WorkspaceType>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('fs_active_workspace');
+        if (saved === 'work' || saved === 'private') return saved;
+      } catch {}
+    }
+    return 'work';
+  });
+
+  const [customPomodoroMinutes, setCustomPomodoroMinutesState] =
+    useState<number>(25);
+  const [customFolders, setCustomFolders] = useState<string[]>([]);
+
+  const [todayIso, setTodayIso] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return computeClientIsoDate();
+    }
+    return FALLBACK_DATE;
+  });
+
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return computeClientIsoDate();
+    }
+    return FALLBACK_DATE;
+  });
+
   const [routines, setRoutines] = useState<RoutineItem[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [goals, setGoals] = useState<GoalItem[]>([]);
@@ -283,6 +353,46 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [mobileTab, setMobileTab] = useState<MobileTab>('routine');
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
+
+  const theme: WorkspaceTheme = useMemo(() => {
+    if (workspace === 'private') {
+      return {
+        name: 'private',
+        accentText: 'text-amber-400',
+        accentBorder: 'border-amber-500/30',
+        accentBg: 'bg-amber-400',
+        accentBgSubtle: 'bg-amber-500/10',
+        accentRing: 'ring-amber-400/50',
+        badge: 'bg-amber-500/15 text-amber-300 border border-amber-500/25',
+        gradient: 'from-amber-400 via-orange-500 to-rose-400',
+        glow: 'shadow-amber-500/15',
+      };
+    }
+    return {
+      name: 'work',
+      accentText: 'text-emerald-400',
+      accentBorder: 'border-emerald-500/30',
+      accentBg: 'bg-emerald-400',
+      accentBgSubtle: 'bg-emerald-500/10',
+      accentRing: 'ring-emerald-400/50',
+      badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
+      gradient: 'from-emerald-400 via-teal-500 to-sky-400',
+      glow: 'shadow-emerald-500/15',
+    };
+  }, [workspace]);
+
+  const folders = useMemo(() => {
+    const set = new Set<string>([
+      'General',
+      'Architecture',
+      'Personal',
+      ...customFolders,
+    ]);
+    notes.forEach((n) => {
+      if (n.folder) set.add(n.folder);
+    });
+    return Array.from(set);
+  }, [notes, customFolders]);
 
   const streak = useMemo(
     () => calculateStreak(activityDates, todayIso),
@@ -298,6 +408,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
   const todayIsoRef = useRef<string>(todayIso);
   const activityMapRef = useRef<Record<string, number>>(activityMap);
   const streakFreezesRef = useRef<number>(streakFreezes);
+  const customPomodoroMinutesRef = useRef<number>(customPomodoroMinutes);
 
   useEffect(() => {
     activityDatesRef.current = activityDates;
@@ -305,7 +416,15 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     todayIsoRef.current = todayIso;
     activityMapRef.current = activityMap;
     streakFreezesRef.current = streakFreezes;
-  }, [activityDates, scratchpad, todayIso, activityMap, streakFreezes]);
+    customPomodoroMinutesRef.current = customPomodoroMinutes;
+  }, [
+    activityDates,
+    scratchpad,
+    todayIso,
+    activityMap,
+    streakFreezes,
+    customPomodoroMinutes,
+  ]);
 
   const pushToast = useCallback(
     (message: string, type: 'success' | 'info' | 'error' = 'info') => {
@@ -320,6 +439,21 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const addFolder = useCallback((folderName: string) => {
+    const trimmed = folderName.trim();
+    if (!trimmed) return;
+    setCustomFolders((prev) =>
+      prev.includes(trimmed) ? prev : [...prev, trimmed]
+    );
+  }, []);
+
+  const setWorkspace = useCallback((ws: WorkspaceType) => {
+    setWorkspaceState(ws);
+    try {
+      localStorage.setItem('fs_active_workspace', ws);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -351,12 +485,103 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const syncMeta = useCallback(
+    (
+      nextScratch: string,
+      nextDates: string[],
+      nextMap?: Record<string, number>,
+      nextFreezes?: number,
+      nextPomoMinutes?: number
+    ) => {
+      if (!user) return;
+      const computedStreak = calculateStreak(nextDates, todayIsoRef.current);
+      const mapToSync = nextMap || activityMapRef.current;
+      const freezesToSync =
+        typeof nextFreezes === 'number'
+          ? nextFreezes
+          : streakFreezesRef.current;
+      const pomoToSync =
+        typeof nextPomoMinutes === 'number'
+          ? nextPomoMinutes
+          : customPomodoroMinutesRef.current;
+
+      setSyncStatus('syncing');
+      supabase
+        .from('workspace_meta')
+        .upsert(
+          {
+            user_id: user.id,
+            scratchpad: nextScratch,
+            streak: computedStreak,
+            activity_dates: nextDates,
+            activity_map: mapToSync,
+            streak_freezes: freezesToSync,
+            custom_pomodoro_minutes: pomoToSync,
+            last_active_date: todayIsoRef.current,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        )
+        .then(({ error }) => {
+          setSyncStatus(error ? 'error' : 'synced');
+        });
+    },
+    [user]
+  );
+
+  const setCustomPomodoroMinutes = useCallback(
+    (minutes: number) => {
+      const safeMinutes = Math.max(1, Math.min(180, minutes));
+      setCustomPomodoroMinutesState(safeMinutes);
+      syncMeta(
+        scratchpadRef.current,
+        activityDatesRef.current,
+        activityMapRef.current,
+        streakFreezesRef.current,
+        safeMinutes
+      );
+    },
+    [syncMeta]
+  );
+
+  const setScratchpad = useCallback(
+    (text: string) => {
+      setScratchpadState(text);
+      if (scratchpadTimerRef.current) {
+        clearTimeout(scratchpadTimerRef.current);
+      }
+      scratchpadTimerRef.current = setTimeout(() => {
+        syncMeta(text, activityDatesRef.current);
+      }, 400);
+    },
+    [syncMeta]
+  );
+
   useEffect(() => {
     const checkDateRollover = () => {
       const currentClientDate = computeClientIsoDate();
       setTodayIso((prev) => {
         if (prev !== currentClientDate) {
           setSelectedDate((sel) => (sel === prev ? currentClientDate : sel));
+          if (user) {
+            setRoutines((currentRoutines) =>
+              currentRoutines.map((r) => ({ ...r, completed: false }))
+            );
+            supabase
+              .from('routines')
+              .update({ completed: false })
+              .eq('user_id', user.id)
+              .then();
+            supabase
+              .from('workspace_meta')
+              .update({
+                last_active_date: currentClientDate,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', user.id)
+              .then();
+            pushToast('New day detected — daily routines reset', 'info');
+          }
           return currentClientDate;
         }
         return prev;
@@ -378,56 +603,191 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       clearInterval(interval);
     };
-  }, []);
+  }, [user, pushToast]);
 
   useEffect(() => {
     if (!user) return;
     let active = true;
     const userId = user.id;
-    const cacheKey = `fs_cache_${userId}`;
+    const globalCacheKey = `fs_global_meta_${userId}`;
 
-    const loadWorkspace = async () => {
-      setSyncStatus('syncing');
-
+    queueMicrotask(() => {
+      if (!active) return;
       try {
-        const cachedRaw = localStorage.getItem(cacheKey);
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw);
-          if (Array.isArray(cached.routines)) setRoutines(cached.routines);
-          if (Array.isArray(cached.notes)) setNotes(cached.notes);
-          if (Array.isArray(cached.goals)) setGoals(cached.goals);
-          if (typeof cached.scratchpad === 'string')
-            setScratchpadState(cached.scratchpad);
-          if (Array.isArray(cached.activityDates))
-            setActivityDates(cached.activityDates);
-          if (cached.activityMap && typeof cached.activityMap === 'object')
-            setActivityMap(cached.activityMap);
-          if (typeof cached.streakFreezes === 'number')
-            setStreakFreezes(cached.streakFreezes);
+        const globalCachedRaw = localStorage.getItem(globalCacheKey);
+        if (globalCachedRaw) {
+          const globalCached = JSON.parse(globalCachedRaw);
+          if (Array.isArray(globalCached.activityDates))
+            setActivityDates(globalCached.activityDates);
+          if (
+            globalCached.activityMap &&
+            typeof globalCached.activityMap === 'object'
+          )
+            setActivityMap(globalCached.activityMap);
+          if (typeof globalCached.streakFreezes === 'number')
+            setStreakFreezes(globalCached.streakFreezes);
+          if (typeof globalCached.customPomodoroMinutes === 'number')
+            setCustomPomodoroMinutesState(globalCached.customPomodoroMinutes);
         }
       } catch {}
+    });
 
-      const [routinesRes, notesRes, goalsRes, metaRes] = await Promise.all([
+    const fetchGlobalMeta = async () => {
+      const { data: metaData, error } = await supabase
+        .from('workspace_meta')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!active) return;
+
+      const clientToday = computeClientIsoDate();
+      let loadedDates: string[] = [];
+      let loadedMap: Record<string, number> = {};
+      let loadedFreezes = 1;
+      let loadedPomo = 25;
+
+      if (metaData) {
+        loadedDates = Array.isArray(metaData.activity_dates)
+          ? metaData.activity_dates
+          : [];
+        loadedMap =
+          metaData.activity_map && typeof metaData.activity_map === 'object'
+            ? metaData.activity_map
+            : {};
+        loadedFreezes =
+          typeof metaData.streak_freezes === 'number'
+            ? metaData.streak_freezes
+            : 1;
+        loadedPomo =
+          typeof metaData.custom_pomodoro_minutes === 'number'
+            ? metaData.custom_pomodoro_minutes
+            : 25;
+
+        const storedLastDate = metaData.last_active_date;
+        if (storedLastDate && storedLastDate !== clientToday) {
+          supabase
+            .from('routines')
+            .update({ completed: false })
+            .eq('user_id', userId)
+            .then();
+          supabase
+            .from('workspace_meta')
+            .update({
+              last_active_date: clientToday,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId)
+            .then();
+          pushToast('New day detected — daily routines automatically reset', 'info');
+        }
+      } else if (!error) {
+        await supabase.from('workspace_meta').upsert(
+          {
+            user_id: userId,
+            scratchpad: '',
+            streak: 0,
+            activity_dates: [],
+            activity_map: {},
+            streak_freezes: 1,
+            custom_pomodoro_minutes: 25,
+            last_active_date: clientToday,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+      }
+
+      setActivityDates(loadedDates);
+      setActivityMap(loadedMap);
+      setStreakFreezes(loadedFreezes);
+      setCustomPomodoroMinutesState(loadedPomo);
+    };
+
+    fetchGlobalMeta();
+
+    const channel = supabase
+      .channel(`global_meta_${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workspace_meta',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            const row = payload.new as DbWorkspaceMetaRow;
+            if (Array.isArray(row.activity_dates)) {
+              setActivityDates(row.activity_dates);
+            }
+            if (row.activity_map && typeof row.activity_map === 'object') {
+              setActivityMap(row.activity_map);
+            }
+            if (typeof row.streak_freezes === 'number') {
+              setStreakFreezes(row.streak_freezes);
+            }
+            if (typeof row.custom_pomodoro_minutes === 'number') {
+              setCustomPomodoroMinutesState(row.custom_pomodoro_minutes);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [user, pushToast]);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const userId = user.id;
+    const currentWorkspace = workspace;
+    const workspaceCacheKey = `fs_workspace_cache_${userId}_${currentWorkspace}`;
+
+    queueMicrotask(() => {
+      if (!active) return;
+      try {
+        const wsCachedRaw = localStorage.getItem(workspaceCacheKey);
+        if (wsCachedRaw) {
+          const wsCached = JSON.parse(wsCachedRaw);
+          if (Array.isArray(wsCached.routines)) setRoutines(wsCached.routines);
+          if (Array.isArray(wsCached.notes)) setNotes(wsCached.notes);
+          if (Array.isArray(wsCached.goals)) setGoals(wsCached.goals);
+          if (typeof wsCached.scratchpad === 'string')
+            setScratchpadState(wsCached.scratchpad);
+        }
+      } catch {}
+    });
+
+    const fetchWorkspaceData = async () => {
+      setSyncStatus('syncing');
+
+      const [routinesRes, notesRes, goalsRes] = await Promise.all([
         supabase
           .from('routines')
           .select('*')
           .eq('user_id', userId)
+          .eq('workspace', currentWorkspace)
           .order('time_slot', { ascending: true }),
         supabase
           .from('notes')
           .select('*')
           .eq('user_id', userId)
+          .eq('workspace', currentWorkspace)
           .order('updated_at', { ascending: false }),
         supabase
           .from('goals')
           .select('*')
           .eq('user_id', userId)
+          .eq('workspace', currentWorkspace)
           .order('created_at', { ascending: false }),
-        supabase
-          .from('workspace_meta')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle(),
       ]);
 
       if (!active) return;
@@ -438,97 +798,24 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setRoutines((routinesRes.data as DbRoutineRow[]).map(fromDbRoutine));
+      const loadedRoutines = (routinesRes.data as DbRoutineRow[]).map(
+        fromDbRoutine
+      );
+      setRoutines(loadedRoutines);
 
       const loadedNotes = (notesRes.data as DbNoteRow[]).map(fromDbNote);
       setNotes(loadedNotes);
       setActiveNoteId(loadedNotes[0]?.id ?? null);
 
       setGoals((goalsRes.data as DbGoalRow[]).map(fromDbGoal));
-
-      let loadedScratch = '';
-      let loadedDates: string[] = [];
-      let loadedMap: Record<string, number> = {};
-      let loadedFreezes = 1;
-
-      if (metaRes.data) {
-        loadedScratch = metaRes.data.scratchpad ?? '';
-        loadedDates = Array.isArray(metaRes.data.activity_dates)
-          ? metaRes.data.activity_dates
-          : [];
-        loadedMap =
-          metaRes.data.activity_map &&
-          typeof metaRes.data.activity_map === 'object'
-            ? metaRes.data.activity_map
-            : {};
-        loadedFreezes =
-          typeof metaRes.data.streak_freezes === 'number'
-            ? metaRes.data.streak_freezes
-            : 1;
-      } else if (!metaRes.error) {
-        await supabase.from('workspace_meta').upsert(
-          {
-            user_id: userId,
-            scratchpad: '',
-            streak: 0,
-            activity_dates: [],
-            activity_map: {},
-            streak_freezes: 1,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
-      } else {
-        const cachedRaw = localStorage.getItem(cacheKey);
-        if (cachedRaw) {
-          try {
-            const cached = JSON.parse(cachedRaw);
-            if (typeof cached.scratchpad === 'string')
-              loadedScratch = cached.scratchpad;
-            if (Array.isArray(cached.activityDates))
-              loadedDates = cached.activityDates;
-            if (cached.activityMap && typeof cached.activityMap === 'object')
-              loadedMap = cached.activityMap;
-            if (typeof cached.streakFreezes === 'number')
-              loadedFreezes = cached.streakFreezes;
-          } catch {}
-        }
-      }
-
-      const clientToday = computeClientIsoDate();
-      let nextDates = loadedDates;
-      if (!loadedDates.includes(clientToday)) {
-        nextDates = [...loadedDates, clientToday];
-        const nextStreak = calculateStreak(nextDates, clientToday);
-        supabase
-          .from('workspace_meta')
-          .upsert(
-            {
-              user_id: userId,
-              scratchpad: loadedScratch,
-              streak: nextStreak,
-              activity_dates: nextDates,
-              activity_map: loadedMap,
-              streak_freezes: loadedFreezes,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'user_id' }
-          )
-          .then();
-      }
-
-      setScratchpadState(loadedScratch);
-      setActivityDates(nextDates);
-      setActivityMap(loadedMap);
-      setStreakFreezes(loadedFreezes);
       setSyncStatus('synced');
       setIsHydrated(true);
     };
 
-    loadWorkspace();
+    fetchWorkspaceData();
 
     const channel = supabase
-      .channel(`workspace_${userId}`)
+      .channel(`workspace_data_${userId}_${currentWorkspace}`)
       .on(
         'postgres_changes',
         {
@@ -542,6 +829,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
             .from('routines')
             .select('*')
             .eq('user_id', userId)
+            .eq('workspace', currentWorkspace)
             .order('time_slot', { ascending: true })
             .then(({ data }) => {
               if (data) setRoutines((data as DbRoutineRow[]).map(fromDbRoutine));
@@ -561,9 +849,33 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
             .from('goals')
             .select('*')
             .eq('user_id', userId)
+            .eq('workspace', currentWorkspace)
             .order('created_at', { ascending: false })
             .then(({ data }) => {
               if (data) setGoals((data as DbGoalRow[]).map(fromDbGoal));
+            });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notes',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          supabase
+            .from('notes')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('workspace', currentWorkspace)
+            .order('updated_at', { ascending: false })
+            .then(({ data }) => {
+              if (data) {
+                const freshNotes = (data as DbNoteRow[]).map(fromDbNote);
+                setNotes(freshNotes);
+              }
             });
         }
       )
@@ -573,36 +885,48 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, workspace]);
 
   useEffect(() => {
     if (!user || !isHydrated) return;
-    const cacheKey = `fs_cache_${user.id}`;
-    localStorage.setItem(
-      cacheKey,
-      JSON.stringify({
-        routines,
-        notes,
-        goals,
-        scratchpad,
-        streak,
-        activityDates,
-        activityMap,
-        streakFreezes,
-      })
-    );
+    const globalKey = `fs_global_meta_${user.id}`;
+    try {
+      localStorage.setItem(
+        globalKey,
+        JSON.stringify({
+          streak,
+          activityDates,
+          activityMap,
+          streakFreezes,
+          customPomodoroMinutes,
+        })
+      );
+    } catch {}
   }, [
     user,
     isHydrated,
-    routines,
-    notes,
-    goals,
-    scratchpad,
     streak,
     activityDates,
     activityMap,
     streakFreezes,
+    customPomodoroMinutes,
   ]);
+
+  useEffect(() => {
+    if (!user || !isHydrated) return;
+    const wsKey = `fs_workspace_cache_${user.id}_${workspace}`;
+    try {
+      localStorage.setItem(
+        wsKey,
+        JSON.stringify({
+          routines,
+          notes,
+          goals,
+          scratchpad,
+        })
+      );
+    } catch {}
+  }, [user, isHydrated, workspace, routines, notes, goals, scratchpad]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -636,71 +960,26 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const syncMeta = useCallback(
-    (
-      nextScratch: string,
-      nextDates: string[],
-      nextMap?: Record<string, number>,
-      nextFreezes?: number
-    ) => {
-      if (!user) return;
-      const computedStreak = calculateStreak(nextDates, todayIsoRef.current);
-      const mapToSync = nextMap || activityMapRef.current;
-      const freezesToSync =
-        typeof nextFreezes === 'number'
-          ? nextFreezes
-          : streakFreezesRef.current;
-
-      setSyncStatus('syncing');
-      supabase
-        .from('workspace_meta')
-        .upsert(
-          {
-            user_id: user.id,
-            scratchpad: nextScratch,
-            streak: computedStreak,
-            activity_dates: nextDates,
-            activity_map: mapToSync,
-            streak_freezes: freezesToSync,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        )
-        .then(({ error }) => {
-          setSyncStatus(error ? 'error' : 'synced');
-        });
-    },
-    [user]
-  );
-
-  const setScratchpad = (text: string) => {
-    setScratchpadState(text);
-    if (scratchpadTimerRef.current) {
-      clearTimeout(scratchpadTimerRef.current);
-    }
-    scratchpadTimerRef.current = setTimeout(() => {
-      syncMeta(text, activityDatesRef.current);
-    }, 400);
-  };
-
   const logTodayStreak = useCallback(() => {
     const currentToday = computeClientIsoDate();
-    if (!activityDatesRef.current.includes(currentToday)) {
-      const nextDates = [...activityDatesRef.current, currentToday];
-      const nextIntensity = (activityMapRef.current[currentToday] || 0) + 1;
-      const nextMap = { ...activityMapRef.current, [currentToday]: nextIntensity };
-      setActivityDates(nextDates);
-      setActivityMap(nextMap);
-      syncMeta(scratchpadRef.current, nextDates, nextMap);
-      const newStreak = calculateStreak(nextDates, currentToday);
-      pushToast(`Streak extended to ${newStreak} days!`, 'success');
-    } else {
-      const currentStreak = calculateStreak(
-        activityDatesRef.current,
-        currentToday
-      );
-      pushToast(`${currentStreak}-day streak active for today!`, 'info');
-    }
+    const nextDates = activityDatesRef.current.includes(currentToday)
+      ? activityDatesRef.current
+      : [...activityDatesRef.current, currentToday];
+    const nextIntensity = (activityMapRef.current[currentToday] || 0) + 1;
+    const nextMap = {
+      ...activityMapRef.current,
+      [currentToday]: nextIntensity,
+    };
+    setActivityDates(nextDates);
+    setActivityMap(nextMap);
+    syncMeta(scratchpadRef.current, nextDates, nextMap);
+    const newStreak = calculateStreak(nextDates, currentToday);
+    pushToast(
+      `Daily streak recorded (+1)! Streak: ${newStreak} day${
+        newStreak === 1 ? '' : 's'
+      }`,
+      'success'
+    );
   }, [syncMeta, pushToast]);
 
   const consumeStreakFreeze = useCallback(() => {
@@ -710,7 +989,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     }
     const currentToday = computeClientIsoDate();
     const [y, m, d] = currentToday.split('-').map(Number);
-    const prevDate = new Date(y, m - 1, d);
+    const prevDate = new Date(y, m - 1, d, 12, 0, 0);
     prevDate.setDate(prevDate.getDate() - 1);
     const py = prevDate.getFullYear();
     const pm = String(prevDate.getMonth() + 1).padStart(2, '0');
@@ -747,6 +1026,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
             .update({ completed: updated.completed })
             .eq('id', id)
             .eq('user_id', user.id)
+            .eq('workspace', workspace)
             .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
 
           const currentToday = todayIsoRef.current;
@@ -777,6 +1057,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     const newItem: RoutineItem = {
       ...item,
       id: `r-${Date.now()}`,
+      workspace,
       completed: false,
       daysOfWeek: item.daysOfWeek || [
         'Mon',
@@ -795,7 +1076,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     setSyncStatus('syncing');
     supabase
       .from('routines')
-      .insert(toDbRoutine(newItem, user.id))
+      .insert(toDbRoutine(newItem, user.id, workspace))
       .then(({ error }) => {
         setSyncStatus(error ? 'error' : 'synced');
         if (!error) pushToast('Routine block added', 'success');
@@ -812,7 +1093,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     setSyncStatus('syncing');
     supabase
       .from('routines')
-      .upsert(toDbRoutine(updated, user.id))
+      .upsert(toDbRoutine(updated, user.id, workspace))
       .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
   };
 
@@ -825,6 +1106,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       .delete()
       .eq('id', id)
       .eq('user_id', user.id)
+      .eq('workspace', workspace)
       .then(() => pushToast('Routine deleted', 'info'));
   };
 
@@ -853,6 +1135,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       .from('routines')
       .update({ completed: false })
       .eq('user_id', user.id)
+      .eq('workspace', workspace)
       .then(() => pushToast('Day reset for a fresh start', 'success'));
   };
 
@@ -861,6 +1144,8 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       const id = `n-${Date.now()}`;
       const newNote: NoteItem = {
         id,
+        workspace,
+        folder: partial?.folder || 'General',
         title: partial?.title || `dev-log-${selectedDate}`,
         content:
           partial?.content ??
@@ -877,7 +1162,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         setSyncStatus('syncing');
         supabase
           .from('notes')
-          .insert(toDbNote(newNote, user.id))
+          .insert(toDbNote(newNote, user.id, workspace))
           .then(({ error }) => {
             setSyncStatus(error ? 'error' : 'synced');
             if (!error) pushToast('New note created', 'success');
@@ -885,7 +1170,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       }
       return id;
     },
-    [user, selectedDate, pushToast]
+    [user, workspace, selectedDate, pushToast]
   );
 
   const updateNote = useCallback(
@@ -903,7 +1188,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
             noteTimersRef.current[id] = setTimeout(() => {
               supabase
                 .from('notes')
-                .upsert(toDbNote(updatedNote, user.id))
+                .upsert(toDbNote(updatedNote, user.id, workspace))
                 .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
             }, 350);
             return updatedNote;
@@ -912,7 +1197,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         })
       );
     },
-    [user]
+    [user, workspace]
   );
 
   const saveNoteSnapshot = (noteId: string) => {
@@ -951,6 +1236,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       .delete()
       .eq('id', id)
       .eq('user_id', user.id)
+      .eq('workspace', workspace)
       .then(() => pushToast('Note deleted', 'info'));
   };
 
@@ -958,6 +1244,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     const newGoal: GoalItem = {
       id: `g-${Date.now()}`,
+      workspace,
       title: item.title,
       category: item.category,
       deadline: item.deadline || undefined,
@@ -970,7 +1257,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     setSyncStatus('syncing');
     supabase
       .from('goals')
-      .insert(toDbGoal(newGoal, user.id))
+      .insert(toDbGoal(newGoal, user.id, workspace))
       .then(({ error }) => {
         setSyncStatus(error ? 'error' : 'synced');
         if (!error) pushToast('Goal added', 'success');
@@ -984,10 +1271,10 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       setSyncStatus('syncing');
       supabase
         .from('goals')
-        .upsert(toDbGoal(updated, user.id))
+        .upsert(toDbGoal(updated, user.id, workspace))
         .then(({ error }) => setSyncStatus(error ? 'error' : 'synced'));
     },
-    [user]
+    [user, workspace]
   );
 
   const toggleGoal = (id: string) => {
@@ -1004,6 +1291,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       .delete()
       .eq('id', id)
       .eq('user_id', user.id)
+      .eq('workspace', workspace)
       .then(() => pushToast('Goal removed', 'info'));
   };
 
@@ -1088,6 +1376,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         .update({ pomodoros_completed: updatedPomodoros })
         .eq('id', routineId)
         .eq('user_id', user.id)
+        .eq('workspace', workspace)
         .then();
 
       const nextIntensity = (activityMapRef.current[currentToday] || 0) + 1;
@@ -1126,19 +1415,20 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
           title: `dev-log-${currentToday}`,
           targetDate: currentToday,
           tag: 'DevLog',
+          folder: 'General',
           content: `# Log: ${currentToday}\n\n## Focus Sessions\n${logLine}\n\n## Tasks\n- [ ] \n`,
         });
       }
 
       pushToast(`Pomodoro logged for ${target.title}!`, 'success');
     },
-    [user, routines, notes, syncMeta, pushToast, updateNote, addNote]
+    [user, workspace, routines, notes, syncMeta, pushToast, updateNote, addNote]
   );
 
   const generateDailyStandup = useCallback(() => {
     const currentToday = computeClientIsoDate();
     const [y, m, d] = currentToday.split('-').map(Number);
-    const prevDate = new Date(y, m - 1, d);
+    const prevDate = new Date(y, m - 1, d, 12, 0, 0);
     prevDate.setDate(prevDate.getDate() - 1);
     const py = prevDate.getFullYear();
     const pm = String(prevDate.getMonth() + 1).padStart(2, '0');
@@ -1209,6 +1499,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         title: `standup-${currentToday}`,
         targetDate: currentToday,
         tag: 'DevLog',
+        folder: 'General',
         content: standupMarkdown,
       });
       setActiveNoteId(targetNoteId);
@@ -1241,7 +1532,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
 
       if (rolloverTasks) {
         const [y, m, d] = currentToday.split('-').map(Number);
-        const tomDate = new Date(y, m - 1, d);
+        const tomDate = new Date(y, m - 1, d, 12, 0, 0);
         tomDate.setDate(tomDate.getDate() + 1);
         const ty = tomDate.getFullYear();
         const tm = String(tomDate.getMonth() + 1).padStart(2, '0');
@@ -1267,6 +1558,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
               title: `dev-log-${tomorrowIso}`,
               targetDate: tomorrowIso,
               tag: 'DevLog',
+              folder: 'General',
               content: `# Log: ${tomorrowIso}\n\n## Rollover Tasks\n${uncompletedHighPriority.join(
                 '\n'
               )}\n\n## Notes\n`,
@@ -1289,11 +1581,12 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         .from('routines')
         .update({ completed: false })
         .eq('user_id', user.id)
+        .eq('workspace', workspace)
         .then();
 
       pushToast('Day wrapped up and routines reset for tomorrow!', 'success');
     },
-    [user, routines, notes, syncMeta, updateNote, addNote, pushToast]
+    [user, workspace, routines, notes, syncMeta, updateNote, addNote, pushToast]
   );
 
   const promoteScratchpadToNote = () => {
@@ -1307,6 +1600,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       title: firstLine || `snippet-${selectedDate}`,
       content: scratchpad,
       tag: 'DevLog',
+      folder: 'General',
       targetDate: selectedDate,
     });
     setScratchpad('');
@@ -1317,6 +1611,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
 
   const exportWorkspace = () => {
     const payload = {
+      workspace,
       routines,
       notes,
       goals,
@@ -1325,6 +1620,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
       activityDates,
       activityMap,
       streakFreezes,
+      customPomodoroMinutes,
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -1333,7 +1629,7 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `flowstate-backup-${todayIso}.json`;
+    a.download = `flowstate-backup-${workspace}-${todayIso}.json`;
     a.click();
     URL.revokeObjectURL(url);
     pushToast('Workspace backup exported', 'success');
@@ -1348,7 +1644,9 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         supabase
           .from('routines')
           .upsert(
-            data.routines.map((r: RoutineItem) => toDbRoutine(r, user.id))
+            data.routines.map((r: RoutineItem) =>
+              toDbRoutine(r, user.id, workspace)
+            )
           )
           .then();
       }
@@ -1356,14 +1654,18 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         setNotes(data.notes);
         supabase
           .from('notes')
-          .upsert(data.notes.map((n: NoteItem) => toDbNote(n, user.id)))
+          .upsert(
+            data.notes.map((n: NoteItem) => toDbNote(n, user.id, workspace))
+          )
           .then();
       }
       if (Array.isArray(data.goals)) {
         setGoals(data.goals);
         supabase
           .from('goals')
-          .upsert(data.goals.map((g: GoalItem) => toDbGoal(g, user.id)))
+          .upsert(
+            data.goals.map((g: GoalItem) => toDbGoal(g, user.id, workspace))
+          )
           .then();
       }
       const nextScratch =
@@ -1379,12 +1681,17 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         typeof data.streakFreezes === 'number'
           ? data.streakFreezes
           : streakFreezes;
+      const nextPomo =
+        typeof data.customPomodoroMinutes === 'number'
+          ? data.customPomodoroMinutes
+          : customPomodoroMinutes;
 
       setScratchpadState(nextScratch);
       setActivityDates(nextDates);
       setActivityMap(nextMap);
       setStreakFreezes(nextFreezes);
-      syncMeta(nextScratch, nextDates, nextMap, nextFreezes);
+      setCustomPomodoroMinutesState(nextPomo);
+      syncMeta(nextScratch, nextDates, nextMap, nextFreezes, nextPomo);
       pushToast('Backup imported & synced', 'success');
       return true;
     } catch {
@@ -1395,7 +1702,9 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     if (user) {
-      localStorage.removeItem(`fs_cache_${user.id}`);
+      localStorage.removeItem(`fs_global_meta_${user.id}`);
+      localStorage.removeItem(`fs_workspace_cache_${user.id}_work`);
+      localStorage.removeItem(`fs_workspace_cache_${user.id}_private`);
     }
     await supabase.auth.signOut();
     setUser(null);
@@ -1418,6 +1727,10 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         isHydrated,
         syncStatus,
         toasts,
+        workspace,
+        theme,
+        customPomodoroMinutes,
+        folders,
         routines,
         notes,
         goals,
@@ -1433,6 +1746,9 @@ export function FlowStateProvider({ children }: { children: React.ReactNode }) {
         mobileTab,
         isScratchpadOpen,
         focusedRoutineId,
+        setWorkspace,
+        setCustomPomodoroMinutes,
+        addFolder,
         setSelectedDate,
         setActiveNoteId,
         setViewMode,
